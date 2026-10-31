@@ -1,0 +1,33 @@
+# 构建与发布产物
+release/
+build/*.dist/
+build/*.build/
+build/*.spec.bak
+build/pip-freeze.txt
+
+# 旧版本归档（保留在本机，不发布）
+legacy/
+
+# 运行期数据（可能含密码盐/哈希、IP、成绩）
+server_data/
+snake_server.config.json
+*.db
+*.db-journal
+*.log
+*.sqlite
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 编辑器与计划
+.trae/
+.vscode/
+.idea/
+
+# 系统
+Thumbs.db
+Desktop.ini
