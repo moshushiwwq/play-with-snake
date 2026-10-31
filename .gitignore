@@ -1,5 +1,13 @@
 # 构建与发布产物
-release/
+# 完整 onedir 产物约 412 MB/端（含 190 MB 的 Qt6WebEngineCore.dll，超出 GitHub 单文件 100 MB 限制），
+# 因此只跟踪两端的主程序 exe（各约 2 MB），其余依赖目录留在本机。
+release/*
+!release/PlayWithSnake-Client/
+release/PlayWithSnake-Client/*
+!release/PlayWithSnake-Client/PlayWithSnake-Client.exe
+!release/PlayWithSnake-Server/
+release/PlayWithSnake-Server/*
+!release/PlayWithSnake-Server/PlayWithSnake-Server.exe
 build/dist/
 build/work/
 build/*.spec.bak
