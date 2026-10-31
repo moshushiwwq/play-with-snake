@@ -19,7 +19,7 @@ a = Analysis(
     ],
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
+    runtime_hooks=[os.path.join(ROOT, 'build', 'runtime_stdio.py')],
     excludes=['tkinter', 'PySide6', 'PyQt5'],
     noarchive=False,
 )

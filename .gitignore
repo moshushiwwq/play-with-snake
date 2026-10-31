@@ -1,9 +1,14 @@
 # 构建与发布产物
 release/
-build/*.dist/
-build/*.build/
+build/dist/
+build/work/
 build/*.spec.bak
 build/pip-freeze.txt
+
+# 自检产物（截图与临时运行目录）
+shots/
+_pkgdata/
+_pkgtest*/
 
 # 旧版本归档（保留在本机，不发布）
 legacy/
