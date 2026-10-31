@@ -1,8 +1,11 @@
 """本机回环 HTTP 服务：托管内置页面，规避 file:// 的联网与存储限制。
 
-页面从 http://127.0.0.1:<随机端口> 加载，因此：
-    · 拥有稳定的 origin，localStorage / IndexedDB 可长期持久化；
+页面从 http://127.0.0.1:<固定端口> 加载，因此：
+    · 拥有稳定的 origin，localStorage / IndexedDB 可以跨启动长期持久化；
     · 不受浏览器对本地文件访问网络的限制。
+
+端口优先使用上次成功占用的端口（由 ClientConfig 持久化），
+被占用时顺序向后寻找，保证多次启动尽量落在同一个 origin。
 """
 from __future__ import annotations
 
@@ -12,15 +15,23 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from server.paths import resource_path
 
+DEFAULT_PAGE_PORT = 17001
+PORT_RANGE = 40
+
 
 class PageServer:
     """静态页面服务（仅监听 127.0.0.1）。"""
 
-    def __init__(self):
-        """初始化（不启动）。"""
+    def __init__(self, preferred_port: int = 0):
+        """初始化（不启动）。
+
+        Args:
+            preferred_port: 优先绑定的端口（0 表示随机）。
+        """
         self._httpd: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
         self.port = 0
+        self.preferred_port = int(preferred_port or 0)
 
     @property
     def url(self) -> str:
@@ -78,7 +89,21 @@ class PageServer:
                 self.end_headers()
                 self.wfile.write(data)
 
-        self._httpd = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        candidates: list[int] = []
+        base = self.preferred_port or DEFAULT_PAGE_PORT
+        for i in range(PORT_RANGE):
+            candidates.append(base + i)
+        candidates.append(0)
+        last_error: Exception | None = None
+        for port in candidates:
+            try:
+                self._httpd = ThreadingHTTPServer(('127.0.0.1', port), Handler)
+                break
+            except OSError as e:
+                last_error = e
+                self._httpd = None
+        if self._httpd is None:
+            raise RuntimeError('本机页面服务启动失败：%s' % last_error)
         self._httpd.daemon_threads = True
         self.port = self._httpd.server_address[1]
         self._thread = threading.Thread(target=self._httpd.serve_forever, daemon=True, name='client-page')

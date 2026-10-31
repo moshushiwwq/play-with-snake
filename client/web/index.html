@@ -984,6 +984,19 @@ body.theme-dark .joy-pad .c1{color:#475569;}
 .isl-actions{display:flex;gap:8px;}
 .isl-actions .btn{flex:1;min-width:0;padding:8px 10px;font-size:12.5px;}
 .isl-note{font-size:11px;color:#8a99b8;line-height:1.55;margin-top:8px;}
+.isl-scan{display:flex;align-items:center;gap:8px;}
+.isl-scan .btn{min-height:30px;padding:6px 11px;font-size:12px;border-radius:9px;}
+.isl-scan-hint{font-size:11px;color:#8a99b8;line-height:1.5;flex:1;min-width:0;}
+.isl-servers{display:flex;flex-direction:column;gap:6px;margin-top:8px;max-height:158px;overflow:auto;}
+.isl-srv{
+  display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:10px;cursor:pointer;
+  background:#f7fafd;border:1.5px solid rgba(30,50,90,.10);transition:border-color .15s,background .15s;
+}
+.isl-srv:hover{border-color:#22b8f0;background:#fff;}
+.isl-srv .sname{font-size:12.5px;font-weight:800;color:#1a2233;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.isl-srv .saddr{font-size:11px;color:#8a99b8;font-family:ui-monospace,Consolas,monospace;}
+.isl-srv .scount{font-size:11px;color:#0aa96a;font-weight:800;}
+.isl-empty{font-size:11.5px;color:#8a99b8;padding:5px 2px;line-height:1.55;}
 
 /* ============================================================
    联机面板（并入对战模式模块，不再是独立大厅页）
@@ -1047,8 +1060,16 @@ body.theme-dark .joy-pad .c1{color:#475569;}
         <button class="isl-btn" id="islBtn" type="button">连接</button>
         <div class="isl-pop" id="islPop">
           <div class="isl-field">
+            <label>自动发现</label>
+            <div class="isl-scan">
+              <button class="btn btn-ghost" id="islScan" type="button">搜索局域网服务器</button>
+              <span class="isl-scan-hint" id="islScanHint">启动后会自动搜索并连接</span>
+            </div>
+            <div class="isl-servers" id="islServers"></div>
+          </div>
+          <div class="isl-field">
             <label>服务器地址</label>
-            <input id="islHostInput" placeholder="如 192.168.1.10（默认端口 8080 / 8081）" autocomplete="off">
+            <input id="islHostInput" placeholder="如 192.168.1.10（端口自动识别）" autocomplete="off">
           </div>
           <div class="isl-actions">
             <button class="btn btn-primary" id="islConnect" type="button">连接服务器</button>
@@ -4398,20 +4419,20 @@ function hueFromColor(hex, idx){
   return h;
 }
 
-/* 解析服务器地址：支持 "IP"、"IP:端口" 与完整 URL */
+/* 解析服务器地址：支持 "IP"、"IP:端口" 与完整 URL。
+   这里只负责拆分主机与用户填写的端口，真实端口由 Backend.resolveServer 询问服务器获得。 */
 function parseHost(raw){
   let s = String(raw || '').trim().replace(/^wss?:\/\//i, '').replace(/^https?:\/\//i, '')
     .replace(/\/+$/, '').replace(/\/ws$/, '');
   if (!s) return null;
   const parts = s.split(':');
-  const host = parts[0];
-  let wsPort = 8081, httpPort = 8080;
+  const host = parts[0] || '127.0.0.1';
+  let port = 0;
   if (parts[1]){
     const p = parseInt(parts[1], 10);
-    if (p === httpPort) wsPort = 8081;
-    else wsPort = p;
+    if (p > 0 && p < 65536) port = p;
   }
-  return { host: host, wsPort: wsPort, httpPort: httpPort };
+  return { host: host, port: port, wsPort: port || 8081, httpPort: 8080 };
 }
 function defaultServerHost(){
   if (SETTINGS.serverHost) return SETTINGS.serverHost;
@@ -4459,6 +4480,11 @@ const Backend = {
                 if (Backend.onMessage) Backend.onMessage(txt);
               });
             }
+            if (Backend.bridge.serversChanged){
+              Backend.bridge.serversChanged.connect(function(txt){
+                if (Backend.onServers) Backend.onServers(txt);
+              });
+            }
             resolve();
           });
         } catch (e){ Backend.mode = 'browser'; resolve(); }
@@ -4467,6 +4493,54 @@ const Backend = {
       document.head.appendChild(s);
     });
     return Backend._ready;
+  },
+  /* 询问服务器真实的 HTTP / WS 端口（避免手填端口与服务器配置不一致） */
+  resolveServer(host, cb){
+    Backend.init().then(function(){
+      const parsed = parseHost(host) || { host: '127.0.0.1', port: 0 };
+      if (Backend.mode === 'qt'){
+        try {
+          Backend.bridge.resolveServer(parsed.host + (parsed.port ? ':' + parsed.port : ''), function(txt){
+            let r = null;
+            try { r = JSON.parse(txt); } catch (e){}
+            if (r && r.httpPort) Backend.setHttpPort(r.httpPort);
+            cb && cb(r || { ok: false, host: parsed.host, wsPort: parsed.wsPort });
+          });
+          return;
+        } catch (e){}
+      }
+      const ports = [];
+      if (parsed.port) ports.push(parsed.port);
+      [8080, 8081].forEach(function(p){ if (ports.indexOf(p) < 0) ports.push(p); });
+      let done = false;
+      function finish(r){ if (done) return; done = true; cb && cb(r); }
+      (function tryAt(i){
+        if (i >= ports.length){
+          finish({ ok: false, host: parsed.host, httpPort: 8080, wsPort: parsed.port || 8081 });
+          return;
+        }
+        fetch('http://' + parsed.host + ':' + ports[i] + '/api/discover', { cache: 'no-store' })
+          .then(function(res){ return res.json(); })
+          .then(function(j){
+            if (j && j.ok){
+              finish({ ok: true, host: parsed.host, httpPort: Number(j.port) || 8080,
+                       wsPort: Number(j.wsPort) || 8081, name: j.name || '', version: j.version || '' });
+            } else { tryAt(i + 1); }
+          })
+          .catch(function(){ tryAt(i + 1); });
+      })(0);
+    });
+  },
+  /* 局域网服务器自动发现（Qt 端由 Python 用 UDP 广播探测） */
+  startDiscovery(){
+    Backend.init().then(function(){
+      if (Backend.mode === 'qt'){ try { Backend.bridge.startDiscovery(); } catch (e){} }
+    });
+  },
+  stopDiscovery(){
+    Backend.init().then(function(){
+      if (Backend.mode === 'qt'){ try { Backend.bridge.stopDiscovery(); } catch (e){} }
+    });
   },
   connect(host, cb){
     Backend.init().then(function(){
@@ -4663,17 +4737,117 @@ function currentName(){
   return _autoName;
 }
 
-/* ---------------- 连接 / 断开 ---------------- */
+/* ---------------- 自动发现与连接 ---------------- */
+let discoveredServers = [];
+let scanStopTimer = null;
+let autoConnectTried = false;
+
+/* 转义 HTML，避免服务器名里的特殊字符破坏结构 */
+function escHtmlText(s){
+  return String(s === undefined || s === null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/* 渲染发现到的服务器列表 */
+function renderDiscovered(){
+  const box = $('islServers');
+  if (!box) return;
+  if (!discoveredServers.length){
+    box.innerHTML = '<div class="isl-empty">暂未发现服务器，可在下方直接填写地址，或确认服务器已启动并开启内网发现。</div>';
+    return;
+  }
+  box.innerHTML = '';
+  discoveredServers.forEach(function(s){
+    const row = document.createElement('div');
+    row.className = 'isl-srv';
+    row.title = '点击连接 ' + s.host + ':' + s.wsPort;
+    row.innerHTML = '<span class="sname">' + escHtmlText(s.name || '服务器') + '</span>' +
+                    '<span class="scount">' + (Number(s.players) || 0) + ' 人</span>' +
+                    '<span class="saddr">' + escHtmlText(s.host + ':' + s.httpPort) + '</span>';
+    row.onclick = function(e){ e.stopPropagation(); connectServerAt(s); };
+    box.appendChild(row);
+  });
+}
+
+/* 开始一次局域网扫描 */
+function startScan(){
+  const hint = $('islScanHint');
+  if (hint) hint.textContent = '正在搜索局域网服务器…';
+  renderDiscovered();
+  Backend.startDiscovery();
+  if (scanStopTimer) clearTimeout(scanStopTimer);
+  scanStopTimer = setTimeout(function(){
+    const h = $('islScanHint');
+    if (h) h.textContent = discoveredServers.length
+      ? ('已发现 ' + discoveredServers.length + ' 台服务器')
+      : '未发现服务器，可手动填写地址';
+  }, 3200);
+}
+
+/* 扫描结果回调 */
+function onServersFound(txt){
+  let list = [];
+  try { list = JSON.parse(txt); } catch (e){ list = []; }
+  discoveredServers = Array.isArray(list) ? list : [];
+  renderDiscovered();
+  const hint = $('islScanHint');
+  if (hint){
+    hint.textContent = discoveredServers.length
+      ? ('已发现 ' + discoveredServers.length + ' 台服务器')
+      : '未发现服务器，可手动填写地址';
+  }
+  autoConnectFromDiscovery();
+}
+
+/* 启动后自动连接发现到的服务器（优先上次连接过的那台） */
+function autoConnectFromDiscovery(){
+  if (autoConnectTried || netConnected || !discoveredServers.length) return;
+  if (SETTINGS.autoConnect === false) return;
+  autoConnectTried = true;
+  const lastHost = String(SETTINGS.serverHost || '').split(':')[0];
+  let target = null;
+  if (lastHost){
+    target = discoveredServers.filter(function(s){ return s.host === lastHost; })[0] || null;
+  }
+  if (!target) target = discoveredServers[0];
+  showToast('已发现服务器 ' + target.host + '，正在连接', '#0b8fd4', 2200);
+  connectServerAt(target);
+}
+
+/* 连接到某个已发现的服务器（端口来自发现结果，无需用户填写） */
+function connectServerAt(s){
+  if (!s) return;
+  Backend.setHttpPort(s.httpPort);
+  if ($('islHostInput')) $('islHostInput').value = s.host;
+  if ($('ovHost')) $('ovHost').value = s.host;
+  const box = $('island'); if (box){ box.classList.remove('open'); box.classList.add('connecting'); }
+  Backend.connect(s.host + ':' + s.wsPort, function(r){
+    if (r && !r.ok) showToast(r.msg || '连接失败', '#d64545', 2400);
+  });
+}
+
 function doConnect(){
   const raw = ($('islHostInput') && $('islHostInput').value.trim()) || ($('ovHost') && $('ovHost').value.trim()) || defaultServerHost();
   const parsed = parseHost(raw);
   if (!parsed){ showToast('请填写正确的服务器地址', '#d64545', 2000); return; }
-  const host = parsed.host + ':' + parsed.wsPort;
   if ($('islHostInput')) $('islHostInput').value = parsed.host;
   if ($('ovHost')) $('ovHost').value = parsed.host;
   const box = $('island'); if (box) { box.classList.remove('open'); box.classList.add('connecting'); }
-  Backend.connect(host, function(r){
-    if (r && !r.ok) showToast(r.msg || '连接失败', '#d64545', 2400);
+  const t = $('islTxt'); if (t) t.textContent = '正在识别服务器端口…';
+  Backend.resolveServer(parsed.host + (parsed.port ? ':' + parsed.port : ''), function(res){
+    let httpPort = res && res.httpPort;
+    let wsPort = res && res.wsPort;
+    /* 探测失败时，用自动发现得到的结果兜底（例如用户只填了 IP） */
+    if ((!res || !res.ok) && discoveredServers.length){
+      const hit = discoveredServers.filter(function(s){ return s.host === parsed.host; })[0];
+      if (hit){ httpPort = hit.httpPort; wsPort = hit.wsPort; }
+    }
+    if (httpPort) Backend.setHttpPort(httpPort);
+    const host = (parsed.host || '127.0.0.1') + ':' + (wsPort || 8081);
+    Backend.connect(host, function(r){
+      if (r && !r.ok) showToast(r.msg || '连接失败', '#d64545', 2400);
+    });
   });
 }
 function doDisconnect(){
@@ -5132,17 +5306,27 @@ function bindOnline(){
   /* 把后端状态与消息接入界面逻辑（浏览器模式与 Qt 模式共用） */
   Backend.onState = onBackendState;
   Backend.onMessage = handleOnlineMsg;
+  Backend.onServers = onServersFound;
   Backend.init();
   const island = $('island');
   if (island){
     island.addEventListener('click', function(e){
       if (e.target.closest('.isl-btn') || e.target.closest('.isl-pop')) return;
       island.classList.toggle('open');
+      if (island.classList.contains('open')) startScan();
     });
   }
   if ($('islBtn')) $('islBtn').onclick = function(){
     if (netConnected){ island.classList.toggle('open'); }
-    else { island.classList.add('open'); if ($('islHostInput')) $('islHostInput').focus(); }
+    else {
+      island.classList.add('open');
+      if ($('islHostInput')) $('islHostInput').focus();
+      startScan();
+    }
+  };
+  if ($('islScan')) $('islScan').onclick = function(e){
+    if (e) e.stopPropagation();
+    startScan();
   };
   if ($('islConnect')) $('islConnect').onclick = doConnect;
   if ($('islDisconnect')) $('islDisconnect').onclick = doDisconnect;
@@ -5216,6 +5400,12 @@ function bindOnline(){
       $('boardOnlineSeg').querySelectorAll('.seg-btn').forEach(function(x){ x.classList.toggle('active', x === b); });
       renderBoard();
     });
+  }
+
+  renderDiscovered();
+  /* 启动后自动搜索局域网服务器并连接（自检模式不打扰既定流程） */
+  if (location.search.indexOf('selftest=1') < 0){
+    setTimeout(function(){ if (!netConnected) startScan(); }, 1500);
   }
 }
 

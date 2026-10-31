@@ -243,16 +243,19 @@ def main() -> int:
     app.setStyleSheet(QSS)
 
     # 单实例：已有实例时只把它唤到前台
+    # 需要握手确认，否则进程异常退出留下的同名管道会让新实例「静默不启动」
     from PyQt6.QtNetwork import QLocalServer, QLocalSocket
     key = 'play-with-snake-server'
     probe = QLocalSocket()
     probe.connectToServer(key)
-    if probe.waitForConnected(300):
+    if probe.waitForConnected(400):
         probe.write(b'SHOW')
         probe.flush()
-        probe.waitForBytesWritten(300)
-        probe.disconnectFromServer()
-        return 0
+        if probe.waitForBytesWritten(400) and probe.waitForReadyRead(600):
+            if b'OK' in bytes(probe.readAll()):
+                probe.disconnectFromServer()
+                return 0
+        probe.abort()
     QLocalServer.removeServer(key)
     holder = QLocalServer()
     holder.listen(key)
@@ -264,9 +267,13 @@ def main() -> int:
                     'ok' if ctx.admin else 'warn')
 
     def on_new_conn():
+        """再次启动时回写握手结果并把主窗口唤到前台。"""
         conn = holder.nextPendingConnection()
         if conn:
             conn.waitForReadyRead(200)
+            conn.write(b'OK')
+            conn.flush()
+            conn.waitForBytesWritten(200)
             if ctx.window:
                 ctx.show_window()
     holder.newConnection.connect(on_new_conn)

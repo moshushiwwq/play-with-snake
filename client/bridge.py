@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -15,7 +16,61 @@ from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
 from PyQt6.QtWidgets import QFileDialog
 
 from client.config import app_data_dir
+from client.discovery import ServerFinder
 from client.storage import ClientStorage
+
+
+class ServerScanner(QObject):
+    """在后台线程扫描局域网服务器，结果通过信号送回主线程（避免阻塞界面）。"""
+
+    found = pyqtSignal(str)   # JSON 数组文本
+
+    def __init__(self, parent=None):
+        """初始化扫描器。
+
+        Args:
+            parent: 父对象。
+        """
+        super().__init__(parent)
+        self.finder = ServerFinder()
+        self._lock = threading.Lock()
+        self._thread: threading.Thread | None = None
+        self._gen = 0
+
+    def start(self, timeout: float = 2.5) -> None:
+        """启动一次扫描（重复调用会取消上一次结果）。
+
+        Args:
+            timeout: 扫描时长（秒）。
+        """
+        with self._lock:
+            self._gen += 1
+            gen = self._gen
+        t = threading.Thread(target=self._run, args=(gen, timeout), daemon=True,
+                             name='snake-scan')
+        self._thread = t
+        t.start()
+
+    def _run(self, gen: int, timeout: float) -> None:
+        """线程主体：扫描并把结果通过信号抛回主线程。
+
+        Args:
+            gen: 本次扫描代号。
+            timeout: 扫描时长。
+        """
+        try:
+            servers = self.finder.scan(timeout)
+        except Exception:
+            servers = []
+        with self._lock:
+            if gen != self._gen:
+                return
+        self.found.emit(json.dumps(servers, ensure_ascii=False))
+
+    def stop(self) -> None:
+        """作废当前扫描结果（线程自然结束）。"""
+        with self._lock:
+            self._gen += 1
 
 
 class SnakeBridge(QObject):
@@ -23,6 +78,7 @@ class SnakeBridge(QObject):
 
     connectionState = pyqtSignal(str, str)
     serverMessage = pyqtSignal(str)
+    serversChanged = pyqtSignal(str)
 
     def __init__(self, net, storage: ClientStorage, config, parent=None):
         """初始化桥接。
@@ -39,6 +95,10 @@ class SnakeBridge(QObject):
         self.config = config
         self.last_host = config.last_server
         self.http_port = 8080
+        # 局域网请求直连，避免系统代理把内网地址转发走导致请求失败
+        self._opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        self.scanner = ServerScanner(self)
+        self.scanner.found.connect(self.serversChanged.emit)
         net.stateChanged.connect(self._on_state)
         net.messageReceived.connect(self.serverMessage.emit)
 
@@ -74,7 +134,7 @@ class SnakeBridge(QObject):
                 data = json.dumps(body, ensure_ascii=False).encode('utf-8')
                 headers['Content-Type'] = 'application/json'
             req = urllib.request.Request(url, data=data, headers=headers)
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
+            with self._opener.open(req, timeout=timeout) as resp:
                 return resp.read().decode('utf-8', 'replace')
         except urllib.error.HTTPError as e:
             try:
@@ -94,6 +154,31 @@ class SnakeBridge(QObject):
             return
         if 1 <= p <= 65535:
             self.http_port = p
+
+    @pyqtSlot(str, result=str)
+    def resolveServer(self, host: str) -> str:
+        """把用户输入的地址解析成真实的 HTTP / WS 端口。
+
+        Args:
+            host: "IP"、"IP:端口" 或完整 URL。
+
+        Returns:
+            JSON 文本 {'ok': bool, 'host': str, 'httpPort': int, 'wsPort': int, ...}。
+        """
+        info = self.scanner.finder.resolve(host)
+        if info.get('httpPort'):
+            self.http_port = int(info['httpPort'])
+        return json.dumps(info, ensure_ascii=False)
+
+    @pyqtSlot()
+    def startDiscovery(self) -> None:
+        """开始扫描局域网服务器（结果通过 serversChanged 信号推送）。"""
+        self.scanner.start(2.5)
+
+    @pyqtSlot()
+    def stopDiscovery(self) -> None:
+        """停止扫描。"""
+        self.scanner.stop()
 
     @pyqtSlot(str, result=str)
     def connectServer(self, host: str) -> str:

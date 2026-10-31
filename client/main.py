@@ -67,8 +67,15 @@ class ClientApp:
         self.args = args
         self.config = ClientConfig()
         self.storage = ClientStorage()
-        self.page_server = PageServer()
+        try:
+            preferred = int(self.config.get('ui/page_port', 0) or 0)
+        except Exception:
+            preferred = 0
+        self.page_server = PageServer(preferred)
         self.page_url = args.url or self.page_server.start()
+        if not args.url:
+            # 记住本次占用的端口，使下次启动落在同一个 origin（localStorage 才能续用）
+            self.config.set('ui/page_port', int(self.page_server.port))
         if args.autotest:
             # 自检需要页面暴露内部接口（正常运行时不会加这个参数）
             self.page_url = self.page_url + ('&' if '?' in self.page_url else '?') + 'selftest=1'
@@ -109,6 +116,10 @@ CLIENT_SINGLE_KEY = 'play-with-snake-client'
 def _activate_existing() -> bool:
     """若已有客户端实例在运行，则通知它把窗口唤到前台。
 
+    只有收到对方回写的 `OK` 才会认为旧实例确实存活：进程异常退出或处于
+    僵尸状态时会留下同名本地管道，此时若直接退出，就会表现为「双击后
+    程序毫无反应」。握手失败即视为陈旧管道，由调用方清理后正常启动。
+
     Returns:
         是否成功唤起已有实例（True 表示当前进程应当直接退出）。
     """
@@ -118,9 +129,15 @@ def _activate_existing() -> bool:
         return False
     probe.write(b'SHOW')
     probe.flush()
-    probe.waitForBytesWritten(400)
+    if not probe.waitForBytesWritten(400):
+        probe.abort()
+        return False
+    if not probe.waitForReadyRead(600):
+        probe.disconnectFromServer()
+        return False
+    ack = bytes(probe.readAll())
     probe.disconnectFromServer()
-    return True
+    return b'OK' in ack
 
 
 def main() -> int:
@@ -153,6 +170,10 @@ def main() -> int:
                 conn = holder.nextPendingConnection()
                 if conn is not None:
                     conn.readAll()
+                    # 回写握手结果，供新进程判断本实例确实存活
+                    conn.write(b'OK')
+                    conn.flush()
+                    conn.waitForBytesWritten(200)
                     conn.disconnectFromServer()
                     conn.deleteLater()
             ctx.window.show_and_raise()
