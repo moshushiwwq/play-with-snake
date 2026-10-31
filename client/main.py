@@ -12,10 +12,16 @@ import os
 import sys
 
 from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtNetwork import QLocalServer, QLocalSocket
 from PyQt6.QtWidgets import QApplication
 
 # QWebEngine 必须在创建 QApplication 之前设置共享 OpenGL 上下文
 QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts, True)
+
+# 部分环境（安全软件 / 组策略 / 以管理员身份运行）会阻止 Chromium 渲染进程启用沙箱，
+# 表现为页面空白、渲染进程异常退出。客户端只渲染内置的本地页面，
+# 因此默认关闭渲染沙箱以保证启动稳定；如需开启可用同名环境变量覆盖。
+os.environ.setdefault('QTWEBENGINE_CHROMIUM_FLAGS', '--no-sandbox')
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
@@ -97,6 +103,26 @@ class ClientApp:
             self.tray.set_state('未连接服务器', False)
 
 
+CLIENT_SINGLE_KEY = 'play-with-snake-client'
+
+
+def _activate_existing() -> bool:
+    """若已有客户端实例在运行，则通知它把窗口唤到前台。
+
+    Returns:
+        是否成功唤起已有实例（True 表示当前进程应当直接退出）。
+    """
+    probe = QLocalSocket()
+    probe.connectToServer(CLIENT_SINGLE_KEY)
+    if not probe.waitForConnected(400):
+        return False
+    probe.write(b'SHOW')
+    probe.flush()
+    probe.waitForBytesWritten(400)
+    probe.disconnectFromServer()
+    return True
+
+
 def main() -> int:
     """程序入口。
 
@@ -108,22 +134,59 @@ def main() -> int:
     app.setApplicationName('Play With Snake')
     app.setStyleSheet(QSS)
 
+    # 多实例会并发共享同一个 QWebEngine 配置/缓存目录，进而导致渲染进程异常、页面空白，
+    # 因此交互模式只允许一个实例存在：第二次启动时唤起已有窗口后直接退出。
+    holder: QLocalServer | None = None
+    if not (args.shot or args.autotest):
+        if _activate_existing():
+            return 0
+        QLocalServer.removeServer(CLIENT_SINGLE_KEY)
+        holder = QLocalServer()
+        holder.listen(CLIENT_SINGLE_KEY)
+
     ctx = ClientApp(args)
     ctx.build_ui()
+    if holder is not None:
+        def _on_new_connection():
+            """再次启动时把当前窗口唤到前台。"""
+            while holder.hasPendingConnections():
+                conn = holder.nextPendingConnection()
+                if conn is not None:
+                    conn.readAll()
+                    conn.disconnectFromServer()
+                    conn.deleteLater()
+            ctx.window.show_and_raise()
+        holder.newConnection.connect(_on_new_connection)
+    if args.shot or args.autotest:
+        print('page_url=%r view_url=%r' % (ctx.page_url, ctx.window.view.url().toString()))
 
     if args.shot:
         def shot():
+            """显示窗口并在页面加载完成后截图退出（最多等待 8 秒）。"""
             try:
                 ctx.window.show_and_raise()
-                QTimer.singleShot(2200, lambda: (
-                    ctx.window.grab().save(args.shot),
-                    ctx.window.quit_app(),
-                    print('shotsaved=' + args.shot),
-                ))
+                state = {'done': False}
+
+                def save():
+                    """保存截图并退出。"""
+                    if state['done']:
+                        return
+                    state['done'] = True
+                    ok = ctx.window.view.grab().save(args.shot)
+                    print('shotsaved=%s ok=%s url=%s' % (args.shot, ok, ctx.window.view.url().toString()))
+                    ctx.window.quit_app()
+
+                def on_loaded(ok: bool):
+                    """页面加载完成后再留一点渲染时间。"""
+                    print('loadFinished ok=%s url=%s' % (ok, ctx.window.view.url().toString()))
+                    QTimer.singleShot(900, save)
+
+                ctx.window.view.loadFinished.connect(on_loaded)
+                QTimer.singleShot(8000, save)
             except Exception as e:
                 print('shot failed=' + str(e))
                 ctx.window.quit_app()
-        QTimer.singleShot(500, shot)
+        QTimer.singleShot(400, shot)
 
     if args.autotest:
         _run_autotest(ctx, args.autotest)
@@ -198,6 +261,7 @@ window.__AUTOTEST = { results: [], done: false };
                 ctx.window.quit_app()
                 return
         if state['tries'] > 12:
+            print('AUTOTEST EMPTY raw=' + repr(result))
             ctx.window.quit_app()
 
     def run():

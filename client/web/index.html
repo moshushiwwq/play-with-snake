@@ -65,7 +65,7 @@ body{
 }
 .brand-sub{font-size:12px;color:#8593ab;margin-top:5px;letter-spacing:.6px;}
 
-/* ★ 顶部按钮：跟随主页面上下滚动（不再是绝对定位） */
+/* 顶部按钮：跟随主页面上下滚动（不再是绝对定位） */
 #topbar{
   position:static;
   display:flex;
@@ -155,7 +155,7 @@ body.duel #p2field{display:flex;}
 .howto .ht-val{flex:1;min-width:0;}
 
 /* =========================================================
-   ★ 主菜单布局（整页跟随滚动）
+   主菜单布局（整页跟随滚动）
    - #topbar、.brand、.menu-container 均为普通流内元素
    - 整页超高时 #screen-menu 统一滚动，标题/设置/玩法介绍随之移动
    ========================================================= */
@@ -317,7 +317,7 @@ body.theme-dark .editor-cell.wall{background:#8aa0cc;border-color:#aebfe0;}
 .pv-cell.safe{background:rgba(46,204,113,.28);}
 .editor-grid.painting{cursor:crosshair;}
 
-/* ★ 地图预览：与游戏画面一致的 canvas 渲染，且地图被弹窗完整包裹 */
+/* 地图预览：与游戏画面一致的 canvas 渲染，且地图被弹窗完整包裹 */
 .pv-wrap{
   width:100%;
   max-width:100%;
@@ -337,17 +337,17 @@ body.theme-dark .editor-cell.wall{background:#8aa0cc;border-color:#aebfe0;}
   box-shadow:0 4px 14px rgba(30,50,90,.08);
 }
 
-/* ★ 难度与地图弹窗分组标题 */
+/* 难度与地图弹窗分组标题 */
 .dlg-sec-title{
   font-size:11px;font-weight:800;letter-spacing:1.2px;color:#8a99b8;
   margin:14px 0 7px;
 }
 .dlg-sec-title:first-child{margin-top:0;}
 
-/* ★ 编辑器紧凑选择按钮 */
+/* 编辑器紧凑选择按钮 */
 .ed-seg-compact .seg-btn{padding:8px 4px;font-size:12px;}
 
-/* ★ 手机端隐藏：地图大小设置 / 地图宽高比限制（桌面端专用） */
+/* 手机端隐藏：地图大小设置 / 地图宽高比限制（桌面端专用） */
 @media (max-width:719px){
   .only-desktop{display:none !important;}
 }
@@ -872,9 +872,10 @@ body.theme-dark .joy-pad .c1{color:#475569;}
 }
 .food-item .fi-icon{
   width:32px;height:32px;flex-shrink:0;border-radius:9px;
-  display:flex;align-items:center;justify-content:center;font-size:17px;
+  display:flex;align-items:center;justify-content:center;
   background:#f7fafd;border:1px solid rgba(30,50,90,.08);
 }
+.food-item .fi-icon svg{display:block;width:24px;height:24px;}
 .food-item .fi-body{flex:1;min-width:0;}
 .food-item .fi-name{font-size:13px;font-weight:800;color:#1a2233;}
 .food-item .fi-desc{font-size:11px;color:#8a99b8;margin-top:2px;line-height:1.5;}
@@ -1028,7 +1029,7 @@ body.theme-dark .joy-pad .c1{color:#475569;}
 <div id="app">
 
   <div class="screen active" id="screen-menu">
-    <!-- ★ 顶部按钮独立于 .menu-container，绝对定位到右上角 -->
+    <!-- 顶部按钮独立于 .menu-container，绝对定位到右上角 -->
     <div id="topbar">
       <!-- 需求6：设置按钮左侧新增「关于」入口 -->
       <button class="mini-top" id="toAbout">关于</button>
@@ -1036,7 +1037,7 @@ body.theme-dark .joy-pad .c1{color:#475569;}
       <button class="mini-top" id="toHowto">玩法介绍</button>
     </div>
 
-    <!-- ★ 品牌标题独立于 .menu-container，居中横跨整行 -->
+    <!-- 品牌标题独立于 .menu-container，居中横跨整行 -->
     <!-- 灵动岛：服务器连接状态与地址（点击展开连接面板） -->
     <div class="island-wrap">
       <div class="island" id="island">
@@ -1063,7 +1064,7 @@ body.theme-dark .joy-pad .c1{color:#475569;}
       <p class="brand-sub">Alpha 先行版（较多BUG）</p>
     </div>
 
-    <!-- ★ .menu-container 只包含左右两栏 -->
+    <!-- .menu-container 只包含左右两栏 -->
     <div class="menu-container">
       <div class="menu-left">
         <div class="card" id="storageWarnCard" style="display:none">
@@ -1523,15 +1524,15 @@ body.theme-dark .joy-pad .c1{color:#475569;}
       <div class="card">
         <div class="card-title">食物图鉴（全部 9 种）</div>
         <div class="food-grid">
-          <div class="food-item"><div class="fi-icon">🍎</div><div class="fi-body"><div class="fi-name">苹果</div><div class="fi-desc">基础食物，随处可见。吃到后蛇身 +1 节</div></div><div class="fi-score">+10</div></div>
-          <div class="food-item"><div class="fi-icon">⭐</div><div class="fi-body"><div class="fi-name">金星</div><div class="fi-desc">高价值食物，蛇身 +2 节，稀有出现</div></div><div class="fi-score">+60</div></div>
-          <div class="food-item"><div class="fi-icon">💎</div><div class="fi-body"><div class="fi-name">宝石</div><div class="fi-desc">最高分食物，不增加蛇身长度，最稀有</div></div><div class="fi-score">+120</div></div>
-          <div class="food-item"><div class="fi-icon">⚡</div><div class="fi-body"><div class="fi-name">闪电</div><div class="fi-desc">激活后自身加速约 5 秒，便于抢分</div></div><div class="fi-score">+25</div></div>
-          <div class="food-item"><div class="fi-icon">🐢</div><div class="fi-body"><div class="fi-name">乌龟</div><div class="fi-desc">吃到后自身减速约 5 秒，双人模式可用于躲避</div></div><div class="fi-score">+25</div></div>
-          <div class="food-item"><div class="fi-icon">👻</div><div class="fi-body"><div class="fi-name">幽灵</div><div class="fi-desc">激活后约 6 秒内可穿过边界与障碍（允许穿墙的地图不会生成）</div></div><div class="fi-score">+40</div></div>
-          <div class="food-item"><div class="fi-icon">✂️</div><div class="fi-body"><div class="fi-name">剪刀</div><div class="fi-desc">立即缩短蛇身 3 节，蛇身过短时只保留蛇头</div></div><div class="fi-score">+20</div></div>
-          <div class="food-item"><div class="fi-icon">🛡️</div><div class="fi-body"><div class="fi-name">护盾</div><div class="fi-desc">可叠加，每层免疫一次致命碰撞，状态栏显示 x2、x3…</div></div><div class="fi-score">+30</div></div>
-          <div class="food-item"><div class="fi-icon">🌀</div><div class="fi-body"><div class="fi-name">传送门</div><div class="fi-desc">生成一对双向门，走入任意一扇即传送到另一扇，限时存在</div></div><div class="fi-score">+50</div></div>
+          <div class="food-item"><div class="fi-icon"><svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="17" r="10.5" fill="#e74c3c" stroke="rgba(0,0,0,.28)" stroke-width="1.6"/><ellipse cx="19.5" cy="6.5" rx="4.5" ry="2.2" transform="rotate(-34 19.5 6.5)" fill="#2ecc71" stroke="rgba(0,0,0,.2)" stroke-width="1.2"/></svg></div><div class="fi-body"><div class="fi-name">苹果</div><div class="fi-desc">基础食物，随处可见。吃到后蛇身 +1 节</div></div><div class="fi-score">+10</div></div>
+          <div class="food-item"><div class="fi-icon"><svg viewBox="0 0 32 32" aria-hidden="true"><polygon points="16,3 19.5,10.7 28.4,12 21.7,17.9 23.6,27.6 16,22 8.4,27.6 10.3,17.9 3.6,12 12.5,10.7" fill="#f1c40f" stroke="rgba(0,0,0,.28)" stroke-width="1.6" stroke-linejoin="round"/></svg></div><div class="fi-body"><div class="fi-name">金星</div><div class="fi-desc">高价值食物，蛇身 +2 节，稀有出现</div></div><div class="fi-score">+60</div></div>
+          <div class="food-item"><div class="fi-icon"><svg viewBox="0 0 32 32" aria-hidden="true"><polygon points="16,2 25.9,9.7 22.5,28.7 9.5,28.7 6.1,9.7" fill="#3498db" stroke="rgba(0,0,0,.28)" stroke-width="1.6" stroke-linejoin="round"/><path d="M16 2V28.7M6.1 9.7H25.9" stroke="rgba(255,255,255,.6)" stroke-width="1.3"/></svg></div><div class="fi-body"><div class="fi-name">宝石</div><div class="fi-desc">最高分食物，不增加蛇身长度，最稀有</div></div><div class="fi-score">+120</div></div>
+          <div class="food-item"><div class="fi-icon"><svg viewBox="0 0 32 32" aria-hidden="true"><polygon points="14.2,3.8 22.8,14.7 17.6,14.7 20.2,28.2 9.2,17 14.7,17" fill="#e67e22" stroke="rgba(0,0,0,.28)" stroke-width="1.6" stroke-linejoin="round"/></svg></div><div class="fi-body"><div class="fi-name">闪电</div><div class="fi-desc">激活后自身加速约 5 秒，便于抢分</div></div><div class="fi-score">+25</div></div>
+          <div class="food-item"><div class="fi-icon"><svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="11" fill="#27ae60" stroke="rgba(0,0,0,.28)" stroke-width="1.6"/><circle cx="16" cy="16" r="4.8" fill="#fff"/></svg></div><div class="fi-body"><div class="fi-name">乌龟</div><div class="fi-desc">吃到后自身减速约 5 秒，双人模式可用于躲避</div></div><div class="fi-score">+25</div></div>
+          <div class="food-item"><div class="fi-icon"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 27V15a12 12 0 0 1 24 0v12Q25 23 22 27Q19 23 16 27Q13 23 10 27Q7 23 4 27Z" fill="#9b59b6" stroke="rgba(0,0,0,.28)" stroke-width="1.6" stroke-linejoin="round"/><circle cx="11.2" cy="14.8" r="1.8" fill="rgba(0,0,0,.65)"/><circle cx="20.8" cy="14.8" r="1.8" fill="rgba(0,0,0,.65)"/></svg></div><div class="fi-body"><div class="fi-name">幽灵</div><div class="fi-desc">激活后约 6 秒内可穿过边界与障碍（允许穿墙的地图不会生成）</div></div><div class="fi-score">+40</div></div>
+          <div class="food-item"><div class="fi-icon"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M9.2 6.6 22.8 25.4M22.8 6.6 9.2 25.4" stroke="#e84393" stroke-width="3.4" stroke-linecap="round"/><circle cx="9.2" cy="6.6" r="3.1" fill="#e84393" stroke="rgba(0,0,0,.28)" stroke-width="1.3"/><circle cx="22.8" cy="6.6" r="3.1" fill="#e84393" stroke="rgba(0,0,0,.28)" stroke-width="1.3"/></svg></div><div class="fi-body"><div class="fi-name">剪刀</div><div class="fi-desc">立即缩短蛇身 3 节，蛇身过短时只保留蛇头</div></div><div class="fi-score">+20</div></div>
+          <div class="food-item"><div class="fi-icon"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 4 26 9v9q0 5.5-10 10Q6 23.5 6 18V9Z" fill="#16a085" stroke="rgba(0,0,0,.28)" stroke-width="1.6" stroke-linejoin="round"/><circle cx="16" cy="16" r="4" fill="rgba(255,255,255,.6)"/></svg></div><div class="fi-body"><div class="fi-name">护盾</div><div class="fi-desc">可叠加，每层免疫一次致命碰撞，状态栏显示 x2、x3…</div></div><div class="fi-score">+30</div></div>
+          <div class="food-item"><div class="fi-icon"><svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="11.4" fill="#8e44ad" stroke="rgba(0,0,0,.28)" stroke-width="1.6"/><circle cx="16" cy="16" r="7.1" fill="#fff"/><circle cx="16" cy="16" r="4.4" fill="none" stroke="#fff" stroke-width="1.6"/></svg></div><div class="fi-body"><div class="fi-name">传送门</div><div class="fi-desc">生成一对双向门，走入任意一扇即传送到另一扇，限时存在</div></div><div class="fi-score">+50</div></div>
         </div>
         <p class="field-hint" style="margin-top:9px">护盾、闪电、乌龟、幽灵与传送门均为限时或可叠加效果；连击状态下吃掉食物可获得最高 5 倍分数</p>
       </div>

@@ -19,6 +19,10 @@ from PyQt6.QtWidgets import QApplication, QMessageBox
 # 同时要早于任何 QtWebEngine 模块的导入。
 QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts, True)
 
+# 与客户端一致：部分环境会阻止 Chromium 渲染进程启用沙箱，导致「访问密码与排行榜」
+# 面板空白。服务器只渲染本地面板页面，因此默认关闭渲染沙箱，可用同名环境变量覆盖。
+os.environ.setdefault('QTWEBENGINE_CHROMIUM_FLAGS', '--no-sandbox')
+
 # 让 `python server/main.py` 也能导入 shared/ 与 server/
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
