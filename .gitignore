@@ -10,6 +10,7 @@ release/PlayWithSnake-Server/*
 !release/PlayWithSnake-Server/PlayWithSnake-Server.exe
 build/dist/
 build/work/
+build/artifacts/
 build/*.spec.bak
 build/pip-freeze.txt
 
