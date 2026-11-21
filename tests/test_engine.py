@@ -21,6 +21,9 @@ class TestEngine(unittest.TestCase):
         svc.handle(a, '{"t":"create","name":"甲","maxPlayers":2,"map":"classic","diff":"normal","isPublic":true}')
         code = a.room.code
         svc.handle(b, '{"t":"join","code":"%s","name":"乙"}' % code)
+        # 需求：未全员准备不能开局（这里先把两名玩家都置为已准备）
+        svc.handle(a, '{"t":"ready","ready":true}')
+        svc.handle(b, '{"t":"ready","ready":true}')
         svc.handle(a, '{"t":"start"}')
         return svc, a, b, a.room
 

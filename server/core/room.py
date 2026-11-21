@@ -170,19 +170,30 @@ class Room:
             if s['conn'] is not target:
                 s['conn'].send({'t': 'roomUpdate', 'room': self.public_info()})
 
-    def start_game(self, by_name: str = '') -> dict:
+    def start_game(self, by_name: str = '', require_ready: bool = True) -> dict:
         """开始新一局。
 
         Args:
             by_name: 触发者昵称（展示用）。
+            require_ready: 是否要求全员已准备（房主手动开局必须为 True；
+                全员再来一局投票通过后可直接开局）。
 
         Returns:
-            {'ok': bool, 'msg': str}。
+            {'ok': bool, 'msg': str, 'notReady': list}。
         """
         if len(self.players) < 2:
             return {'ok': False, 'msg': '至少需要 2 名玩家'}
         if self.game is not None and self.game.phase != 'over':
             return {'ok': False, 'msg': '当前对局还没结束'}
+        if require_ready:
+            not_ready = [p['name'] for p in self.players if not p['ready']]
+            if not_ready:
+                return {
+                    'ok': False,
+                    'notReady': not_ready,
+                    'msg': '还有玩家未准备：%s（%d/%d 已准备）' % (
+                        '、'.join(not_ready), len(self.players) - len(not_ready), len(self.players)),
+                }
         self.round += 1
         self.state = 'playing'
         self.rematch_votes.clear()

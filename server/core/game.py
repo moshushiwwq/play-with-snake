@@ -7,11 +7,64 @@
 """
 from __future__ import annotations
 
+import colorsys
 import math
 import random
 import time
 
 from shared.constants import DIFFS
+
+# 单局回放最多录制的帧数（防止极端长局把内存撑爆；10 帧/秒时约合 160 秒）
+MAX_REPLAY_FRAMES = 1600
+
+# 镜头朝向索引，与客户端 DIR_LIST 顺序（右/下/左/上）一致
+_DIR_IDX = {(1, 0): 0, (0, 1): 1, (-1, 0): 2, (0, -1): 3}
+
+# 道具在回放食物串里的类型下标，与客户端 FOOD_KEYS 顺序一致
+_POWER_IDX = {'speed': 3, 'slow': 4, 'ghost': 5, 'shield': 7}
+
+_B36 = '0123456789abcdefghijklmnopqrstuvwxyz'
+
+
+def _b36(n: int) -> str:
+    """整数转 36 进制（与客户端坐标编码同源）。"""
+    n = int(n)
+    if n <= 0:
+        return '0'
+    out = []
+    while n:
+        n, r = divmod(n, 36)
+        out.append(_B36[r])
+    return ''.join(reversed(out))
+
+
+def _enc(x: int, y: int, rows: int, w: int) -> str:
+    """把格坐标编码成定长 36 进制字符串（客户端 decCell 可直接解码）。"""
+    return _b36(x * rows + y).rjust(w, '0')
+
+
+def hue_from_color(hex_color: str, idx: int = 0) -> int:
+    """把 #RRGGBB 颜色换成 0-360 色相，供回放按玩家上色。
+
+    Args:
+        hex_color: 颜色字符串。
+        idx: 玩家序号（用于兜底配色）。
+
+    Returns:
+        色相整数。
+    """
+    fallback = (152, 212, 45, 330)[idx % 4]
+    s = str(hex_color or '').strip().lstrip('#')
+    if len(s) != 6:
+        return fallback
+    try:
+        r = int(s[0:2], 16) / 255.0
+        g = int(s[2:4], 16) / 255.0
+        b = int(s[4:6], 16) / 255.0
+    except Exception:
+        return fallback
+    h, _, _ = colorsys.rgb_to_hsv(r, g, b)
+    return int(round(h * 360)) % 360
 
 
 class Game:
@@ -55,6 +108,10 @@ class Game:
         self.lives: dict[int, int] = {}
         self.started_at = time.time()
         self.elapsed = 0.0
+        # 回放录制：服务端权威录制，客户端只负责播放
+        self.cell_w = 3 if (self.cols * self.rows - 1) >= 1296 else 2
+        self.rec_obstacles = [[o['x'], o['y']] for o in self.obstacles]
+        self.rec_frames: list[dict] = []
         self.spawn()
 
     # ------------------------------------------------------------------ 生成
@@ -204,6 +261,8 @@ class Game:
                 self.countdown = 0
                 self.phase = 'playing'
                 self.started_at = time.time()
+                # 开局即录一帧，回放一开始就能看到双方的初始站位与蛇色
+                self.record_frame()
             return
         if self.phase != 'playing':
             return
@@ -325,7 +384,56 @@ class Game:
             self.powers[i]['life'] -= 1
             if self.powers[i]['life'] <= 0:
                 self.powers.pop(i)
+        self.record_frame()
         self.check_end()
+
+    # ------------------------------------------------------------------ 回放
+    def record_frame(self) -> None:
+        """录制一帧回放数据（字段与客户端 drawReplayFrame 完全对齐）。"""
+        if len(self.rec_frames) >= MAX_REPLAY_FRAMES:
+            return
+        w, rows = self.cell_w, self.rows
+        bodies = [''.join(_enc(c['x'], c['y'], rows, w) for c in s['body']) for s in self.snakes]
+        segs = []
+        for f in self.foods:
+            segs.append(_enc(f['x'], f['y'], rows, w) + ('1' if f.get('k') == 2 else '0'))
+        for p in self.powers:
+            segs.append(_enc(p['x'], p['y'], rows, w) + _b36(_POWER_IDX.get(p.get('k'), 0)))
+        self.rec_frames.append({
+            'b': bodies,
+            'f': ''.join(segs),
+            'o': len(self.rec_obstacles),
+            's': [int(s['score']) for s in self.snakes],
+            'd': [_DIR_IDX.get((s['dir']['x'], s['dir']['y']), 0) for s in self.snakes],
+            'pt': '',
+        })
+
+    def replay_payload(self) -> dict:
+        """生成本局回放（记录信息 + 帧数组）。"""
+        diff_name = self.diff['name']
+        players = [s['name'] for s in self.snakes]
+        skins = [hue_from_color(s['color'], i) for i, s in enumerate(self.snakes)]
+        rec = {
+            'mode': 'duel' if len(self.snakes) > 1 else 'single',
+            'players': players,
+            'skins': skins,
+            'colors': [s['color'] for s in self.snakes],
+            'cols': self.cols,
+            'rows': self.rows,
+            'cellCode': self.cell_w,
+            'obstacles': self.rec_obstacles,
+            'mapId': self.map.get('id', 'classic'),
+            'mapName': self.map.get('name', '经典'),
+            'diff': self.room.settings.get('diff', 'normal'),
+            'diffName': diff_name,
+            'date': time.strftime('%Y-%m-%d %H:%M'),
+            'duration': int(round(self.elapsed / 1000)),
+            'round': self.round,
+            'code': self.room.code,
+            'scores': [int(s['score']) for s in self.snakes],
+            'lens': [len(s['body']) for s in self.snakes],
+        }
+        return {'rec': rec, 'frames': list(self.rec_frames)}
 
     def kill(self, s: dict, reason: str) -> None:
         """处理一次死亡：一命制，撞到即淘汰（与双人对战一致，不再复活）。
@@ -392,6 +500,11 @@ class Game:
         self.room.service.log('房间 %s 第 %d 局结束，冠军 %s' % (
             self.room.code, self.round,
             next((r['name'] for r in rows if r.get('win')), '-')))
+        # 联机成绩自动入库 + 回放入库（名称固定为玩家 IP，同分只留更早的一条）
+        try:
+            self.room.service.publish_online_result(self.room, self)
+        except Exception as e:  # 入榜失败不能影响对局结算与房间流程
+            self.room.service.log('联机成绩入榜失败：%s' % e, 'warn')
 
     # ------------------------------------------------------------------ 快照
     def snapshot(self) -> dict:

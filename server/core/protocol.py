@@ -170,7 +170,10 @@ def handle_message(service, conn, text: str) -> None:
             return
         r = room.start_game(conn.name)
         if not r.get('ok'):
-            conn.send({'t': 'err', 'msg': r.get('msg')})
+            msg = r.get('msg')
+            if r.get('notReady'):
+                msg = '还有玩家未准备（%s），等全员准备后再开始' % '、'.join(r['notReady'])
+            conn.send({'t': 'err', 'msg': msg})
         return
 
     if t == 'settings':
@@ -226,7 +229,7 @@ def handle_message(service, conn, text: str) -> None:
             conn.name, len(room.rematch_votes), needed)})
         if len(room.rematch_votes) >= needed:
             room.game = None
-            room.start_game('全员再来一局')
+            room.start_game('全员再来一局', require_ready=False)
         else:
             room.send_room()
         return

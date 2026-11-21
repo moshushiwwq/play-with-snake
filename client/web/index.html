@@ -419,6 +419,19 @@ body.theme-dark .map-opt .mo-name{color:#e2e8f0;}
   flex-shrink:0;font-size:13px;font-weight:800;color:#0aa96a;
   font-variant-numeric:tabular-nums;padding:0 4px;white-space:nowrap;
 }
+/* 回放颜色图例：谁是什么颜色，一眼可辨（单人/双人/联机通用） */
+.rp-legend{display:flex;align-items:center;gap:6px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end;}
+.rp-chip{
+  display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:999px;
+  background:#f2f7fd;border:1px solid rgba(30,50,90,.08);
+  font-size:10.5px;font-weight:700;color:#54657f;white-space:nowrap;max-width:96px;
+  overflow:hidden;text-overflow:ellipsis;
+}
+.rp-chip i{width:9px;height:9px;border-radius:50%;flex:none;}
+body.theme-dark .rp-chip{background:#1c2740;border-color:rgba(255,255,255,.10);color:#9fb0c9;}
+@media (max-width:640px){
+  .rp-legend .rp-chip{font-size:9.5px;padding:1px 5px;max-width:72px;}
+}
 
 #game-wrap{flex:1;min-height:0;position:relative;}
 canvas{
@@ -521,6 +534,10 @@ canvas{
 .row .nm{font-size:13.5px;font-weight:800;color:#1a2233;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .row .meta{font-size:10.5px;color:#95a3bd;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .row .val{font-size:17px;font-weight:900;font-variant-numeric:tabular-nums;color:#0aa96a;flex-shrink:0;}
+/* 联机榜回放入口 */
+.row .ob-rp{flex-shrink:0;padding:4px 9px;font-size:11px;font-weight:800;
+  border-radius:9px;border:1px solid rgba(34,184,240,.35);background:rgba(34,184,240,.10);color:#0b8fd4;}
+.row .ob-rp:active{transform:scale(.95);}
 .row .val.blue{color:#0b8fd4;}
 .row .val.gold{color:#d99b00;}
 .mini-btn{
@@ -1024,6 +1041,23 @@ body.theme-dark .joy-pad .c1{color:#475569;}
 .online-panel .card{padding:11px 12px;}
 .ov-sub{font-size:11.5px;color:#8a99b8;line-height:1.6;margin-top:6px;}
 .online-room-meta{font-size:11.5px;color:#8a99b8;margin-top:6px;line-height:1.6;}
+/* 房间页「我控制的蛇」颜色标签 */
+.my-snake-chip{
+  display:flex;align-items:center;gap:7px;margin-top:8px;padding:7px 10px;border-radius:10px;
+  background:#f3f8ff;border:1px solid rgba(30,50,90,.08);
+}
+.my-snake-chip .msc-dot{width:13px;height:13px;border-radius:50%;flex:none;
+  box-shadow:0 0 0 3px rgba(255,255,255,.7),0 0 8px rgba(0,0,0,.08);}
+.my-snake-chip .msc-txt{font-size:12px;color:#54657f;}
+.my-snake-chip .msc-txt b{color:#1a2233;}
+body.theme-dark .my-snake-chip{background:#1c2740;border-color:rgba(255,255,255,.08);}
+body.theme-dark .my-snake-chip .msc-txt{color:#9fb0c9;}
+body.theme-dark .my-snake-chip .msc-txt b{color:#e2e8f0;}
+/* 联机建房/加入弹窗 */
+.room-dlg .dlg-sec-title{font-size:11.5px;font-weight:800;color:#7c8bb0;letter-spacing:1px;margin:10px 0 6px;}
+.room-dlg .dlg-sec-title:first-of-type{margin-top:2px;}
+.room-dlg .map-opt{margin-bottom:6px;}
+.room-dlg .seg-btn{font-size:12.5px;}
 .map-manage-grid{display:flex;flex-direction:column;gap:7px;}
 
 /* ============================================================
@@ -1129,58 +1163,13 @@ body.theme-dark .joy-pad .c1{color:#475569;}
 
           <div class="online-panel" id="onlineMain">
             <div class="card" style="border-radius:12px;box-shadow:none;background:#fbfdff">
-              <div class="field" style="margin-bottom:8px"><label>服务器</label>
-                <input id="ovHost" placeholder="服务器 IP（默认端口 8080 / 8081）" autocomplete="off"></div>
-              <div class="net-inline">
-                <button class="btn btn-primary" id="ovConnect" type="button">连接服务器</button>
-                <button class="btn btn-ghost" id="ovDisconnect" type="button">断开</button>
-                <button class="mini-btn" id="ovRefreshRooms" type="button">刷新房间</button>
-                <button class="mini-btn" id="ovAdmin" type="button">管理员选项</button>
+              <div class="card-title">开一局联机对战</div>
+              <div class="net-inline" style="flex-wrap:wrap">
+                <button class="btn btn-primary" id="ovCreateBtn" type="button">创建房间</button>
+                <button class="btn btn-ghost" id="ovJoinBtn" type="button">加入房间</button>
               </div>
-              <div class="ov-sub" id="ovStatus">未连接</div>
-            </div>
-
-            <div class="card" style="border-radius:12px;box-shadow:none;background:#fff">
-              <div class="card-title">公开房间</div>
-              <div class="pcard-list" id="ovRooms"></div>
-            </div>
-
-            <div class="card" style="border-radius:12px;box-shadow:none;background:#fff">
-              <div class="card-title">创建房间</div>
-              <div class="field"><label>人数</label>
-                <div class="seg" id="ovMaxSeg" style="flex:1">
-                  <button class="seg-btn active" data-v="2">2人</button>
-                  <button class="seg-btn" data-v="3">3人</button>
-                  <button class="seg-btn" data-v="4">4人</button>
-                </div></div>
-              <div class="field" style="align-items:flex-start"><label>地图</label>
-                <div class="seg" id="ovMapSeg" style="flex:1;flex-wrap:wrap"></div></div>
-              <div class="field" style="align-items:flex-start"><label>难度</label>
-                <div class="seg" id="ovDiffSeg" style="flex:1;flex-wrap:wrap"></div></div>
-              <div class="field"><label>密码</label><input id="ovPass" placeholder="留空为无密码" maxlength="16" autocomplete="off"></div>
-              <div class="field"><label>公开</label>
-                <div class="seg" id="ovPubSeg" style="flex:1">
-                  <button class="seg-btn active" data-v="1">公开</button>
-                  <button class="seg-btn" data-v="0">私密</button>
-                </div></div>
-              <button class="btn btn-primary" id="ovCreate" type="button" style="width:100%">创建并进入</button>
-            </div>
-
-            <div class="card" style="border-radius:12px;box-shadow:none;background:#fff">
-              <div class="card-title">加入私密房间</div>
-              <div class="net-inline">
-                <input id="ovJoinCode" placeholder="4 位房间码" maxlength="4"
-                  style="flex:1;text-transform:uppercase;padding:9px 11px;border-radius:10px;border:1.5px solid rgba(30,50,90,.12);background:#f7fafd;font-family:inherit;font-size:16px;color:#1a2233;outline:none">
-                <button class="btn btn-ghost" id="ovJoin" type="button">加入</button>
-              </div>
-              <div class="field" style="margin-top:8px"><label>密码</label><input id="ovJoinPass" placeholder="房间有密码时填写" maxlength="16" autocomplete="off"></div>
-              <div class="ov-sub">公开房间直接在上方列表点「加入」即可，无需输入房间码。</div>
-            </div>
-
-            <div class="card" style="border-radius:12px;box-shadow:none;background:#fff">
-              <div class="card-title">联机排行榜（前 30）</div>
-              <div class="pcard-list" id="ovTopList"></div>
-              <button class="btn btn-ghost" id="ovTopRefresh" type="button" style="width:100%;margin-top:8px">刷新联机排行榜</button>
+              <div class="ov-sub" id="ovStatus" style="margin-top:8px">未连接</div>
+              <div class="ov-sub" style="margin-top:2px">服务器连接在右上角灵动岛里操作；创建/加入都以弹窗方式设置。</div>
             </div>
           </div>
 
@@ -1196,6 +1185,7 @@ body.theme-dark .joy-pad .c1{color:#475569;}
                 <button class="mini-btn" id="ovCopy" type="button">复制邀请</button>
               </div>
               <div class="online-room-meta" id="ovMeta"></div>
+              <div class="my-snake-chip" id="ovMyColor"></div>
             </div>
 
             <div class="card" style="border-radius:12px;box-shadow:none;background:#fff">
@@ -1205,33 +1195,26 @@ body.theme-dark .joy-pad .c1{color:#475569;}
 
             <div class="card" id="ovHostCard" style="border-radius:12px;box-shadow:none;background:#fff">
               <div class="card-title">房主设置</div>
-              <div class="field"><label>人数</label><input id="ovRoomMax" type="number" min="2" max="4" value="2"></div>
-              <div class="field"><label>地图</label><select id="ovRoomMap" style="flex:1;padding:9px;border-radius:10px;border:1.5px solid rgba(30,50,90,.12);background:#f7fafd;font-family:inherit;font-size:14px"></select></div>
-              <div class="field"><label>难度</label><select id="ovRoomDiff" style="flex:1;padding:9px;border-radius:10px;border:1.5px solid rgba(30,50,90,.12);background:#f7fafd;font-family:inherit;font-size:14px"></select></div>
-              <div class="field"><label>密码</label><input id="ovRoomPass" placeholder="留空表示不修改密码" maxlength="16" autocomplete="off"></div>
-              <div class="field"><label>公开</label>
-                <div class="seg" id="ovRoomPubSeg" style="flex:1">
-                  <button class="seg-btn active" data-v="1">公开</button>
-                  <button class="seg-btn" data-v="0">私密</button>
-                </div></div>
-              <button class="btn btn-ghost" id="ovApply" type="button" style="width:100%">应用设置</button>
+              <div class="ov-sub" id="ovHostSummary">标准：经典地图 · 普通</div>
+              <button class="btn btn-ghost" id="ovEditSet" type="button" style="width:100%;margin-top:8px">修改房间设置</button>
             </div>
 
-            <div class="net-inline" style="flex-wrap:wrap">
+            <div class="net-inline" style="flex-wrap:wrap;margin-top:10px">
               <button class="btn btn-primary" id="ovReady" type="button">准备好了</button>
               <button class="btn btn-primary" id="ovStart" type="button">开始对战</button>
               <button class="btn btn-ghost" id="ovLeave" type="button">离开房间</button>
             </div>
+            <div class="ov-sub" id="ovReadyHint" style="text-align:center"></div>
           </div>
         </div>
 
-        <div class="card">
+        <div class="card" id="diffMapCard">
           <div class="card-title">难度与地图</div>
           <button class="btn btn-ghost" id="diffMapBtn" type="button" style="width:100%;text-align:left">普通 · 经典地图</button>
           <p class="field-hint">点击按钮，在弹出的面板中选择难度与地图</p>
         </div>
 
-        <div class="card">
+        <div class="card" id="playerCard">
           <div class="card-title">玩家</div>
           <div class="field">
             <label>玩家 1</label>
@@ -1343,8 +1326,8 @@ body.theme-dark .joy-pad .c1{color:#475569;}
     <!-- 联机榜的独立分类：联机单人 / 联机双人 -->
     <div class="filters" id="boardOnlineSeg" style="padding-top:6px;display:none">
       <div class="seg" style="width:100%">
-        <button class="seg-btn active" data-ob="single">联机单人</button>
-        <button class="seg-btn" data-ob="duel">联机双人</button>
+        <button class="seg-btn" data-ob="single">联机单人</button>
+        <button class="seg-btn active" data-ob="duel">联机双人</button>
       </div>
     </div>
     <!-- 刷新 + 一键上传：所有榜单仅展示前 30 名 -->
@@ -3885,23 +3868,33 @@ function renderOnlineBoard(el){
   }).slice(0, 30);
   if (!list.length){
     el.innerHTML = '<div class="empty">暂无' + (onlineBoardFilter === 'duel' ? '联机双人' : '联机单人') +
-      '榜单数据<br>点击上方「刷新排行榜」拉取</div>';
+      '榜单数据' + (onlineBoardFilter === 'single' ? '（联机对局至少 2 人，成绩都记在「联机双人」）' : '') +
+      '<br>点击上方「刷新排行榜」拉取</div>';
     return;
   }
   el.innerHTML = list.map(function(r, i){
     const g = i === 0 ? 'g1' : i === 1 ? 'g2' : i === 2 ? 'g3' : '';
-    let meta = (r.mode === 'duel' ? '双人' : '单人') + ' · ' + esc(r.diffName || r.diff || '');
+    let meta = (r.mode === 'duel' ? '联机' : '单人') + ' · ' + esc(r.diffName || r.diff || '');
     if (r.mapName && r.mapName !== '经典') meta += ' · ' + esc(r.mapName);
-    if (r.ip) meta += ' · IP ' + esc(r.ip);
-    /* 管理员没有为该 IP 添加备注时不显示备注字段 */
+    /* 联机成绩的名称固定为玩家 IP，这里补上本局一起玩的昵称，便于认领 */
+    const mates = (r.players || []).filter(function(n){ return n && n !== r.name; });
+    if (mates.length) meta += ' · 同局 ' + esc(mates.join('、'));
+    if (r.duration) meta += ' · ' + r.duration + 's';
     if (r.note) meta += ' · 备注：' + esc(r.note);
+    const rp = r.hasReplay && r.replayId
+      ? '<button class="mini-btn ob-rp" data-rp="' + esc(r.replayId) + '">回放</button>'
+      : '<span class="meta" style="flex:none">无回放</span>';
     return '<div class="row">' +
       '<div class="rank ' + g + '">' + (i + 1) + '</div>' +
       '<div class="info"><div class="nm">' + esc(r.name || '玩家') + '</div>' +
         '<div class="meta">' + meta + ' · ' + esc(r.date || '') + '</div></div>' +
       '<div class="val" style="font-size:14px">' + (r.score || 0) + '</div>' +
+      rp +
     '</div>';
   }).join('');
+  el.querySelectorAll('.ob-rp').forEach(function(b){
+    b.onclick = function(){ playServerReplay(b.dataset.rp); };
+  });
 }
 
 /* ============================================================
@@ -4418,7 +4411,7 @@ let netMaps = null;
 let netDiffs = null;
 let onlinePlayers = [];
 let onlineRoomInfo = null;
-let onlineBoardFilter = 'single';
+let onlineBoardFilter = 'duel';
 let onlineModeActive = false;
 const onlinePicked = { max: 2, mapId: 'classic', diff: 'normal', pub: 1 };
 
@@ -5042,7 +5035,8 @@ function onNetOverMsg(m){
         '<p>' + (result.length > 2 ? '所有玩家同时阵亡' : '双方同时阵亡') + '</p>'
       : '<div class="big" style="color:#0aa96a">' + (winner ? (esc(winner.name) + ' 获胜') : '对局结束') + '</div>' +
         '<p>本局共 ' + (result.length || totals.length) + ' 名玩家参与</p>') +
-    '<div class="scoreline">' + line + '</div>',
+    '<div class="scoreline">' + line + '</div>' +
+    '<p class="hint" style="font-size:11.5px;color:#8a99b8">成绩已自动上传联机排行榜（名称显示为你的 IP），可在「排行榜 → 联机榜」查看本局回放</p>',
     [
       { text: '再来一局', cls: 'btn-primary', fn: function(){
           hideOverlay(); onlineEndShown = false;
@@ -5185,57 +5179,207 @@ function setOnlineMode(on){
   const card = $('onlineCard');
   if (card) card.style.display = on ? '' : 'none';
   document.body.classList.remove('duel');
+  /* 联机模式只保留联机自己的入口：单/双人的难度地图、玩家、开始按钮都不再显示
+     （房主创建房间时的难度与地图在弹窗里选择，与单人那套完全一致） */
+  ['diffMapCard', 'playerCard', 'startBtn', 'resumeBtn'].forEach(function(id){
+    const el = $(id);
+    if (!el) return;
+    el.style.display = on ? 'none' : '';
+  });
+  if (!on) refreshResumeBtn();
   if (on){
     showOnlineRoom(!!onlineRoomInfo);
     updateIsland();
   }
 }
 
-function buildOnlineOptions(){
-  const maps = (netMaps && netMaps.length) ? netMaps
-    : [{ id: 'classic', name: '经典空地' }];
-  if (netMaps && !maps.some(function(m){ return m.id === onlinePicked.mapId; })){
-    onlinePicked.mapId = maps[0].id;
-  }
-  const mapSeg = $('ovMapSeg');
-  if (mapSeg){
-    mapSeg.innerHTML = maps.map(function(m){
-      return '<button class="seg-btn' + (m.id === onlinePicked.mapId ? ' active' : '') + '" data-v="' + esc(m.id) + '">' +
-        esc(m.name) + (m.custom ? '（自制）' : '') + '</button>';
-    }).join('');
-  }
-  const diffs = (netDiffs && netDiffs.length) ? netDiffs
-    : [{ id: 'easy', name: '休闲' }, { id: 'normal', name: '普通' }, { id: 'hard', name: '困难' }, { id: 'insane', name: '疯狂' }];
-  if (!diffs.some(function(d){ return d.id === onlinePicked.diff; })) onlinePicked.diff = diffs[0].id;
-  const diffSeg = $('ovDiffSeg');
-  if (diffSeg){
-    diffSeg.innerHTML = diffs.map(function(d){
-      return '<button class="seg-btn' + (d.id === onlinePicked.diff ? ' active' : '') + '" data-v="' + esc(d.id) + '">' + esc(d.name) + '</button>';
-    }).join('');
-  }
-  const sel = $('ovRoomMap');
-  if (sel){
-    sel.innerHTML = maps.map(function(m){
-      return '<option value="' + esc(m.id) + '">' + esc(m.name) + (m.custom ? '（自制）' : '') + '</option>';
-    }).join('');
-  }
-  const selD = $('ovRoomDiff');
-  if (selD){
-    selD.innerHTML = diffs.map(function(d){
-      return '<option value="' + esc(d.id) + '">' + esc(d.name) + '</option>';
-    }).join('');
-  }
+/* 联机建房/设置弹窗的状态源：与「单人对战的难度与地图」完全同一套 UI，
+   点选即生效，不再使用下拉框。 */
+function onlineMaps(){
+  return (netMaps && netMaps.length) ? netMaps : [{ id: 'classic', name: '经典空地', custom: false }];
 }
 
-function renderRooms(){
-  const el = $('ovRooms');
-  if (!el) return;
-  if (!netConnected){
-    el.innerHTML = '<div class="empty">未连接服务器<br>先在上方填写地址并点击「连接服务器」</div>';
-    return;
+function onlineDiffById(id){
+  return DIFFS.find(function(d){ return d.id === id; }) || DIFFS[2] || DIFFS[0];
+}
+
+function buildOnlineOptions(){
+  /* 服务器下发新地图/难度后，把已选值校正到合法范围（弹窗每次打开都会重画） */
+  const maps = onlineMaps();
+  if (!maps.some(function(m){ return m.id === onlinePicked.mapId; })) onlinePicked.mapId = maps[0].id;
+  if (!DIFFS.some(function(d){ return d.id === onlinePicked.diff; })) onlinePicked.diff = 'normal';
+  if (!(onlinePicked.max >= 2 && onlinePicked.max <= 4)) onlinePicked.max = 2;
+  if (document.querySelector('#modalBox .room-dlg')) refreshRoomDialog();
+}
+
+function closeModal(){
+  $('modalMask').classList.remove('show');
+}
+
+function roomDialogHtml(mode, st){
+  const isEdit = (mode === 'edit');
+  let html = '<div class="room-dlg"><div class="modal-title">' + (isEdit ? '修改房间设置' : '创建房间') + '</div>';
+  html += '<div class="dlg-sec-title">人数</div>';
+  html += '<div class="seg" id="rdMaxSeg" style="margin-bottom:6px">' +
+    [2, 3, 4].map(function(n){
+      return '<button class="seg-btn' + (n === st.max ? ' active' : '') + '" data-v="' + n + '">' + n + '人</button>';
+    }).join('') + '</div>';
+  html += '<div class="dlg-sec-title">难度</div>';
+  html += '<div class="diff-grid" id="dlgDiffGrid">' + diffGridHtml(st.diff) + '</div>';
+  html += '<div class="dlg-sec-title">地图</div>';
+  html += '<div class="map-opt' + (st.mapId === 'classic' ? ' sel' : '') + '" data-mid="classic">' +
+    '<div class="mo-name">经典空地</div><div class="mo-sub">随机障碍，无自定义墙体</div></div>';
+  onlineMaps().filter(function(m){ return m.id !== 'classic'; }).forEach(function(m){
+    html += '<div class="map-opt' + (st.mapId === m.id ? ' sel' : '') + '" data-mid="' + esc(m.id) + '">' +
+      '<div class="mo-name">' + esc(m.name) + (m.custom ? '（自制）' : '') + '</div>' +
+      '<div class="mo-sub">' + (m.cols && m.rows ? (m.cols + '×' + m.rows + ' 格') : '服务器地图') + '</div></div>';
+  });
+  html += '<div class="dlg-sec-title">房间</div>';
+  html += '<div class="seg" id="rdPubSeg" style="margin-bottom:8px">' +
+    '<button class="seg-btn' + (st.pub ? ' active' : '') + '" data-v="1">公开</button>' +
+    '<button class="seg-btn' + (!st.pub ? ' active' : '') + '" data-v="0">私密</button></div>';
+  html += '<div class="field" style="margin:0 0 4px"><input id="rdPass" placeholder="' +
+    (isEdit ? '留空表示不修改密码' : '房间密码（留空为无密码）') + '" maxlength="16" autocomplete="off"></div>';
+  html += '<button class="btn btn-primary" id="rdOk" type="button" style="width:100%;margin-top:4px">' +
+    (isEdit ? '应用设置' : '创建并进入') + '</button>';
+  html += '<button class="btn btn-ghost" id="modalCancel" type="button" style="width:100%;margin-top:8px">取消</button>';
+  html += '</div>';
+  return html;
+}
+
+let roomDlgState = null;
+
+function openRoomDialog(mode){
+  if (!netConnected){ showToast('请先在灵动岛连接服务器', '#d64545', 2200); return; }
+  const info = onlineRoomInfo || {};
+  roomDlgState = {
+    mode: mode,
+    max: mode === 'edit' ? Math.max(2, Math.min(4, info.max || onlinePicked.max)) : onlinePicked.max,
+    diff: mode === 'edit' ? (info.diff || onlinePicked.diff) : onlinePicked.diff,
+    mapId: mode === 'edit' ? (info.map || onlinePicked.mapId) : onlinePicked.mapId,
+    pub: mode === 'edit' ? (info.isPublic !== false) : !!onlinePicked.pub,
+  };
+  $('modalBox').innerHTML = roomDialogHtml(mode, roomDlgState);
+  $('modalMask').classList.remove('lite');
+  $('modalMask').classList.add('show');
+  bindRoomDialog();
+}
+
+function refreshRoomDialog(){
+  if (!roomDlgState) return;
+  const fresh = {
+    mode: roomDlgState.mode, max: roomDlgState.max, diff: roomDlgState.diff,
+    mapId: roomDlgState.mapId, pub: roomDlgState.pub,
+  };
+  $('modalBox').innerHTML = roomDialogHtml(fresh.mode, fresh);
+  bindRoomDialog();
+}
+
+function bindRoomDialog(){
+  const box = $('modalBox');
+  const st = roomDlgState;
+  if (!box || !st) return;
+  const segMax = box.querySelector('#rdMaxSeg');
+  if (segMax){
+    segMax.addEventListener('click', function(e){
+      const b = e.target.closest('.seg-btn'); if (!b) return;
+      st.max = Number(b.dataset.v) || 2;
+      segMax.querySelectorAll('.seg-btn').forEach(function(x){ x.classList.toggle('active', x === b); });
+    });
   }
+  const segPub = box.querySelector('#rdPubSeg');
+  if (segPub){
+    segPub.addEventListener('click', function(e){
+      const b = e.target.closest('.seg-btn'); if (!b) return;
+      st.pub = !!Number(b.dataset.v);
+      segPub.querySelectorAll('.seg-btn').forEach(function(x){ x.classList.toggle('active', x === b); });
+    });
+  }
+  box.querySelectorAll('#dlgDiffGrid .diff-btn').forEach(function(el){
+    el.onclick = function(){
+      st.diff = el.dataset.diff;
+      box.querySelectorAll('#dlgDiffGrid .diff-btn').forEach(function(x){ x.classList.toggle('active', x === el); });
+      sfx(520, 0.06, 'sine', 0.04, 700);
+    };
+  });
+  box.querySelectorAll('.map-opt').forEach(function(el){
+    el.onclick = function(){
+      st.mapId = el.dataset.mid;
+      box.querySelectorAll('.map-opt').forEach(function(x){ x.classList.toggle('sel', x === el); });
+      sfx(520, 0.06, 'sine', 0.04, 700);
+    };
+  });
+  const ok = box.querySelector('#rdOk');
+  if (ok) ok.onclick = function(){
+    const pass = (box.querySelector('#rdPass') || {}).value || '';
+    if (st.mode === 'edit'){
+      onlineSend({ t: 'settings', maxPlayers: st.max, map: st.mapId, diff: st.diff,
+                   password: pass, isPublic: st.pub });
+      showToast('房间设置已提交', '#0aa96a', 1600);
+    } else {
+      onlineSend({ t: 'create', name: currentName(), maxPlayers: st.max,
+                   map: st.mapId, diff: st.diff, password: pass, isPublic: st.pub });
+      onlinePicked.max = st.max; onlinePicked.diff = st.diff;
+      onlinePicked.mapId = st.mapId; onlinePicked.pub = st.pub ? 1 : 0;
+    }
+    closeModal();
+  };
+  const c = box.querySelector('#modalCancel');
+  if (c) c.onclick = closeModal;
+}
+
+function pushLobbyQuery(){
+  if (netConnected) onlineSend({ t: 'lobby' });
+}
+
+/* 加入房间弹窗：公开房间列表 + 私密房房间码，合并成一个入口 */
+function openJoinRoomDialog(){
+  if (!netConnected){ showToast('请先在灵动岛连接服务器', '#d64545', 2200); return; }
+  const box = $('modalBox');
+  let html = '<div class="room-dlg"><div class="modal-title">加入房间</div>';
+  html += '<div class="dlg-sec-title">公开房间</div>';
+  html += '<div class="pcard-list" id="ovJoinList"></div>';
+  html += '<div class="dlg-sec-title" style="margin-top:12px">私密房间（房间码）</div>';
+  html += '<div class="net-inline">' +
+    '<input id="ovJoinCode" placeholder="4 位房间码" maxlength="4" autocomplete="off" ' +
+    'style="flex:1;text-transform:uppercase;padding:9px 11px;border-radius:10px;border:1.5px solid rgba(30,50,90,.12);background:#f7fafd;font-family:inherit;font-size:16px;color:#1a2233;outline:none">' +
+    '<button class="btn btn-ghost" id="ovJoin" type="button">加入</button></div>';
+  html += '<div class="field" style="margin-top:8px"><input id="ovJoinPass" placeholder="房间有密码时填写" maxlength="16" autocomplete="off"></div>';
+  html += '<button class="btn btn-ghost" id="modalCancel" type="button" style="width:100%;margin-top:10px">关闭</button>';
+  html += '</div>';
+  box.innerHTML = html;
+  $('modalMask').classList.remove('lite');
+  $('modalMask').classList.add('show');
+  renderJoinRoomList();
+  pushLobbyQuery();
+  const join = $('ovJoin');
+  if (join) join.onclick = function(){
+    const code = ($('ovJoinCode') || {}).value ? $('ovJoinCode').value.trim().toUpperCase() : '';
+    if (!code){ showToast('请输入 4 位房间码', '#d64545', 2000); return; }
+    onlineSend({ t: 'join', code: code, name: currentName(),
+                 password: ($('ovJoinPass') || {}).value || '' });
+    closeModal();
+  };
+  const c = $('modalCancel');
+  if (c) c.onclick = closeModal;
+}
+
+function joinRoomByRow(r, spectate, password){
+  if (!r) return;
+  if (password === undefined && r.hasPass){
+    const pwd = prompt('该房间需要密码：', '');
+    if (pwd === null) return;
+    password = pwd;
+  }
+  onlineSend({ t: 'join', code: r.code, name: currentName(), password: password || '', spectate: !!spectate });
+  closeModal();
+}
+
+function renderJoinRoomList(){
+  const el = $('ovJoinList');
+  if (!el) return;
   if (!netRooms.length){
-    el.innerHTML = '<div class="empty">当前没有公开房间，可在下方创建一局</div>';
+    el.innerHTML = '<div class="empty">当前没有公开房间，可以让房主创建一局，或用房间码加入私密房</div>';
     return;
   }
   el.innerHTML = netRooms.map(function(r, i){
@@ -5251,17 +5395,24 @@ function renderRooms(){
   el.querySelectorAll('[data-room]').forEach(function(b){
     b.onclick = function(){
       const r = netRooms[Number(b.dataset.room)];
-      if (!r) return;
-      const spectate = (r.state === 'playing' || r.isFull);
-      if (r.hasPass){
-        const pwd = prompt('该房间需要密码：', '');
-        if (pwd === null) return;
-        onlineSend({ t: 'join', code: r.code, name: currentName(), password: pwd, spectate: spectate });
-      } else {
-        onlineSend({ t: 'join', code: r.code, name: currentName(), spectate: spectate });
-      }
+      joinRoomByRow(r, (r && (r.state === 'playing' || r.isFull)));
     };
   });
+}
+
+/* 兼容旧调用名：房间列表变化时只刷新加入弹窗里的列表 */
+function renderRooms(){
+  renderJoinRoomList();
+}
+
+/* 服务器蛇色 → 中文名 + 色块标签（开局前让玩家知道自己是哪条蛇） */
+const ONLINE_COLOR_NAMES = {
+  '#34e39b': '薄荷绿', '#38bdf8': '天蓝', '#fbbf24': '琥珀黄', '#f472b6': '樱粉'
+};
+function colorName(hex){
+  const h = String(hex || '').toLowerCase();
+  if (ONLINE_COLOR_NAMES[h]) return ONLINE_COLOR_NAMES[h];
+  return h ? h : '默认';
 }
 
 function renderRoom(){
@@ -5273,11 +5424,42 @@ function renderRoom(){
       (info.diffName || '') + ' · ' + (info.mapName || '') +
       (info.hasPass ? ' · 有密码' : '') + (info.state === 'playing' ? ' · 对局进行中' : '');
   }
+  /* 我控制的蛇颜色：取服务器分配给我的那条蛇 */
+  const me = onlinePlayers.find(function(p){ return p.name === onlineMyName; });
+  const myColor = (me && me.color) || '';
+  const chip = $('ovMyColor');
+  if (chip){
+    if (onlineRole === 'spectator' || !myColor){
+      chip.innerHTML = '<span class="msc-txt">' + (onlineRole === 'spectator' ? '观战中，不参与操控' : '等待分配蛇色…') + '</span>';
+    } else {
+      chip.innerHTML = '<span class="msc-dot" style="background:' + esc(myColor) + '"></span>' +
+        '<span class="msc-txt">你控制的蛇：<b>' + esc(colorName(myColor)) + '</b></span>';
+    }
+  }
+  const readyCount = onlinePlayers.filter(function(p){ return p.ready; }).length;
+  const total = onlinePlayers.length;
+  const allReady = total >= 2 && readyCount === total;
+  const notReady = onlinePlayers.filter(function(p){ return !p.ready; }).map(function(p){ return p.name; });
   const hostCard = $('ovHostCard');
   if (hostCard) hostCard.style.display = (onlineRole === 'host') ? '' : 'none';
+  if ($('ovHostSummary')){
+    $('ovHostSummary').textContent = (info.max || 2) + ' 人 · ' + (info.mapName || '经典空地') + ' · ' +
+      (info.diffName || '普通') + ' · ' + (info.isPublic === false ? '私密' : '公开') +
+      (info.hasPass ? ' · 有密码' : '');
+  }
   const startBtn = $('ovStart');
-  if (startBtn) startBtn.style.display = (onlineRole === 'host') ? '' : 'none';
-  if ($('ovReady')) $('ovReady').textContent = (info.state === 'playing') ? '对战中…' : '准备好了';
+  if (startBtn){
+    startBtn.style.display = (onlineRole === 'host') ? '' : 'none';
+    startBtn.disabled = !allReady;
+    startBtn.textContent = allReady ? '开始对战' : ('开始对战（' + readyCount + '/' + total + ' 已准备）');
+    startBtn.title = allReady ? '' : ('还有未准备：' + (notReady.join('、') || '需要至少 2 名玩家'));
+  }
+  if ($('ovReady')){
+    const mine = onlinePlayers.find(function(p){ return p.name === onlineMyName; });
+    $('ovReady').textContent = (info.state === 'playing') ? '对战中…'
+      : ((mine && mine.ready) ? '取消准备' : '准备好了');
+    $('ovReady').disabled = (onlineRole === 'spectator') || (info.state === 'playing');
+  }
   const pl = $('ovPlayers');
   if (pl){
     pl.innerHTML = onlinePlayers.length ? onlinePlayers.map(function(p){
@@ -5285,30 +5467,21 @@ function renderRoom(){
         '<div class="avatar" style="background:' + esc(p.color || '#0aa96a') + '">' + esc((p.name || '?').slice(0, 1)) + '</div>' +
         '<div style="flex:1;min-width:0"><div class="nm">' + esc(p.name || '玩家') +
           (p.name === onlineMyName ? '（我）' : '') + (p.host ? ' ' + ico('crown') : '') + '</div>' +
-        '<div class="st">' + (p.host ? '房主' : (p.ready ? '已准备' : '未准备')) + '</div></div>' +
+        '<div class="st">' + (p.host ? '房主 · ' : '') + esc(colorName(p.color)) + ' · ' +
+          (p.ready ? '已准备' : '未准备') + '</div></div>' +
       '</div>';
     }).join('') : '<div class="empty">等待玩家加入…</div>';
   }
-  if ($('ovRoomMax') && document.activeElement !== $('ovRoomMax')) $('ovRoomMax').value = info.max || 2;
-  if ($('ovRoomMap') && info.map) $('ovRoomMap').value = info.map;
-  if ($('ovRoomDiff') && info.diff) $('ovRoomDiff').value = info.diff;
+  const hint = $('ovReadyHint');
+  if (hint){
+    hint.textContent = (total < 2) ? '至少需要 2 名玩家才能开始'
+      : (allReady ? '全员已准备，即将自动开局' : ('未准备：' + notReady.join('、')));
+  }
 }
 
 function renderOnlineTop(){
-  const html = function(list){
-    if (!list.length) return '<div class="empty">暂无联机榜数据</div>';
-    return list.slice(0, 30).map(function(r, i){
-      return '<div class="pcard">' +
-        '<div class="rank" style="width:26px;height:26px;border-radius:8px;display:flex;align-items:center;justify-content:center;background:#f0f5fb;color:#7c8bb0;font-weight:900;font-size:12px">' + (i + 1) + '</div>' +
-        '<div style="flex:1;min-width:0"><div class="nm">' + esc(r.name || '玩家') + '</div>' +
-        '<div class="st">' + (r.mode === 'duel' ? '双人' : '单人') + ' · ' + esc(r.diff || '') +
-          (r.mapName ? ' · ' + esc(r.mapName) : '') + ' · <b style="color:#0aa96a">' + (r.score || 0) + '</b></div></div>' +
-      '</div>';
-    }).join('');
-  };
-  const a = $('ovTopList'), b = $('lbTopList');
-  if (a) a.innerHTML = html(netTopRows);
-  if (b) b.innerHTML = html(netTopRows);
+  /* 联机榜已统一到「排行榜 → 联机榜」页（联机面板内不再重复展示） */
+  if (boardTab === 'online') renderBoard();
 }
 
 function fetchOnlineTop(showMsg){
@@ -5368,69 +5541,32 @@ function bindOnline(){
   if ($('islConnect')) $('islConnect').onclick = doConnect;
   if ($('islDisconnect')) $('islDisconnect').onclick = doDisconnect;
   if ($('islAdmin')) $('islAdmin').onclick = openAdminPanel;
-  if ($('ovConnect')) $('ovConnect').onclick = doConnect;
-  if ($('ovDisconnect')) $('ovDisconnect').onclick = doDisconnect;
-  if ($('ovAdmin')) $('ovAdmin').onclick = openAdminPanel;
-  if ($('ovRefreshRooms')) $('ovRefreshRooms').onclick = function(){ onlineSend({ t: 'lobby' }); };
-  if ($('ovTopRefresh')) $('ovTopRefresh').onclick = function(){ fetchOnlineTop(true); };
-  if ($('ovCreate')) $('ovCreate').onclick = function(){
-    if (!netConnected){ showToast('请先连接服务器', '#d64545', 2200); return; }
-    const pass = $('ovPass') ? $('ovPass').value : '';
-    const pub = $('ovPubSeg') ? ($('ovPubSeg').querySelector('.seg-btn.active') || {}).dataset : null;
-    onlineSend({
-      t: 'create', name: currentName(),
-      maxPlayers: onlinePicked.max, map: onlinePicked.mapId, diff: onlinePicked.diff,
-      password: pass, isPublic: pub ? !!Number(pub.v) : true
-    });
+  /* 联机面板已精简：服务器连接/断开/管理全部走灵动岛，不再有面板内控件 */
+  if ($('ovCreateBtn')) $('ovCreateBtn').onclick = function(){ openRoomDialog('create'); };
+  if ($('ovJoinBtn')) $('ovJoinBtn').onclick = openJoinRoomDialog;
+  if ($('ovReady')) $('ovReady').onclick = function(){
+    if (onlineRole === 'spectator') return;
+    const mine = onlinePlayers.find(function(p){ return p.name === onlineMyName; });
+    onlineSend({ t: 'ready', ready: !(mine && mine.ready) });
   };
-  if ($('ovJoin')) $('ovJoin').onclick = function(){
-    if (!netConnected){ showToast('请先连接服务器', '#d64545', 2200); return; }
-    const code = $('ovJoinCode') ? $('ovJoinCode').value.trim().toUpperCase() : '';
-    if (!code){ showToast('请输入 4 位房间码', '#d64545', 2000); return; }
-    onlineSend({ t: 'join', code: code, name: currentName(), password: $('ovJoinPass') ? $('ovJoinPass').value : '' });
-  };
-  if ($('ovReady')) $('ovReady').onclick = function(){ onlineSend({ t: 'ready', ready: true }); };
   if ($('ovStart')) $('ovStart').onclick = function(){
     if (onlineRole !== 'host'){ showToast('只有房主可以开始对战', '#d64545', 2000); return; }
+    const notReady = onlinePlayers.filter(function(p){ return !p.ready; }).map(function(p){ return p.name; });
+    if (onlinePlayers.length < 2 || notReady.length){
+      showToast('还有玩家未准备（' + (notReady.join('、') || '需要至少 2 名玩家') + '），不能开始', '#d64545', 2600);
+      return;
+    }
     onlineSend({ t: 'start' });
   };
   if ($('ovLeave')) $('ovLeave').onclick = function(){ leaveOnline(true); };
+  if ($('ovEditSet')) $('ovEditSet').onclick = function(){
+    if (onlineRole !== 'host') return;
+    openRoomDialog('edit');
+  };
   if ($('ovCopy')) $('ovCopy').onclick = function(){
-    const text = '房间码 ' + (onlineRoom || '') + '，打开游戏后在「联机对战 → 加入私密房间」输入即可。';
+    const text = '房间码 ' + (onlineRoom || '') + '，打开游戏后在「联机对战 → 加入房间 → 私密房间」输入即可。';
     try { navigator.clipboard.writeText(text); showToast('邀请已复制', '#0aa96a', 1800); } catch (e){ prompt('复制下面内容：', text); }
   };
-  if ($('ovApply')) $('ovApply').onclick = function(){
-    if (onlineRole !== 'host') return;
-    const pubBtn = $('ovRoomPubSeg') ? $('ovRoomPubSeg').querySelector('.seg-btn.active') : null;
-    onlineSend({
-      t: 'settings',
-      maxPlayers: Math.max(2, Math.min(4, Number($('ovRoomMax').value) || 2)),
-      map: $('ovRoomMap').value, diff: $('ovRoomDiff').value,
-      password: $('ovRoomPass').value,
-      isPublic: pubBtn ? !!Number(pubBtn.dataset.v) : true
-    });
-    showToast('房间设置已提交', '#0aa96a', 1600);
-  };
-
-  [['ovMaxSeg', function(v){ onlinePicked.max = Number(v) || 2; }],
-   ['ovMapSeg', function(v){ onlinePicked.mapId = v; }],
-   ['ovDiffSeg', function(v){ onlinePicked.diff = v; }],
-   ['ovPubSeg', function(v){ onlinePicked.pub = Number(v); }]].forEach(function(pair){
-    const seg = $(pair[0]);
-    if (!seg) return;
-    seg.addEventListener('click', function(e){
-      const b = e.target.closest('.seg-btn'); if (!b) return;
-      pair[1](b.dataset.v);
-      seg.querySelectorAll('.seg-btn').forEach(function(x){ x.classList.toggle('active', x === b); });
-    });
-  });
-
-  if ($('ovRoomPubSeg')){
-    $('ovRoomPubSeg').addEventListener('click', function(e){
-      const b = e.target.closest('.seg-btn'); if (!b) return;
-      $('ovRoomPubSeg').querySelectorAll('.seg-btn').forEach(function(x){ x.classList.toggle('active', x === b); });
-    });
-  }
 
   if ($('boardOnlineSeg')){
     $('boardOnlineSeg').addEventListener('click', function(e){
@@ -5451,28 +5587,56 @@ function bindOnline(){
 /* ============================================================
    回放
    ============================================================ */
+/* 统一的开场：单人 / 双人 / 联机 回放都走这里，保证颜色按玩家 index 还原 */
+function startReplay(rec, frames, opts){
+  if (!rec || !frames || !frames.length){
+    alert('这条记录没有可用的回放数据');
+    return;
+  }
+  stopReplay();
+  hideOverlay();
+  G.replayActive = true;
+  G.phase = 'ready';
+  G.replay = {
+    rec: rec, frames: frames, idx: 0, playing: true, timer: 0, speed: 90,
+    from: (opts && opts.from) || 'local'
+  };
+  /* 回放使用当时记录下来的蛇色（联机为每条蛇各自的颜色） */
+  const sk = rec.skins || {};
+  G.skinHues = (rec.players || [1]).map(function(_, i){
+    return (sk[i] !== undefined && sk[i] !== null) ? sk[i]
+      : ((rec.mode === 'duel' || (rec.players || []).length > 1) ? (i === 1 ? 212 : 152) : 152);
+  });
+  /* 地图尺寸按回放记录还原，网格与画布比例才对得上 */
+  G.replayDims = { cols: COLS, rows: ROWS };
+  if (rec.cols > 0 && rec.rows > 0){ COLS = rec.cols; ROWS = rec.rows; }
+  buildReplayHUD();
+  showScreen('screen-game');
+  setTimeout(function(){ resize(); }, 0);
+  sfx(600, 0.08, 'sine', 0.05, 880);
+}
+
 function playReplay(id){
   const rec = DB.get(K_RECORDS, []).find(function(r){ return r.id === id; });
   if (!rec){ alert('找不到这条记录'); return; }
   idbGet(id).then(function(frames){
-    if (!frames || !frames.length){
-      alert('这条记录没有可用的回放数据');
+    startReplay(rec, frames, { from: 'local' });
+  });
+}
+
+/* 联机榜回放：帧由服务端录制，按回放 id 拉取 */
+function playServerReplay(replayId){
+  if (!replayId){ showToast('这条记录没有回放', '#d64545', 2000); return; }
+  if (!netConnected){ showToast('请先连接服务器再观看联机回放', '#d64545', 2200); return; }
+  showToast('正在加载回放…', '#0b8fd4', 1400);
+  Backend.httpGet('/api/replay?id=' + encodeURIComponent(replayId), netServerHost, function(j){
+    if (!j || !j.ok || !Array.isArray(j.frames) || !j.frames.length){
+      showToast((j && j.msg) || '回放加载失败', '#d64545', 2600);
       return;
     }
-    stopReplay();
-    G.replayActive = true;
-    G.phase = 'ready';
-    G.replay = { rec: rec, frames: frames, idx: 0, playing: true, timer: 0, speed: 90 };
-    /* 回放使用当时保存的皮肤颜色，而不是当前设置 */
-    const sk = rec.skins || {};
-    G.skinHues = [
-      (sk[0] !== undefined && sk[0] !== null) ? sk[0] : 152,
-      (sk[1] !== undefined && sk[1] !== null) ? sk[1] : ((rec.mode === 'duel') ? 212 : 152)
-    ];
-    buildReplayHUD();
-    showScreen('screen-game');
-    setTimeout(function(){ resize(); }, 0);
-    sfx(600,0.08,'sine',0.05,880);
+    const rec = j.rec || {};
+    G.replaySource = { from: 'online' };
+    startReplay(rec, j.frames, { from: 'online' });
   });
 }
 
@@ -5480,6 +5644,13 @@ function stopReplay(){
   G.replayActive = false;
   G.replay = null;
   G.rpDragging = false;
+  G.replaySource = null;
+  if (G.replayDims){
+    COLS = G.replayDims.cols;
+    ROWS = G.replayDims.rows;
+    G.replayDims = null;
+    lastSizeKey = '';
+  }
   if (buffsEl){
     buffsEl.innerHTML = '';
     buffsEl._buffSig = null;
@@ -5510,14 +5681,25 @@ function updateReplayUI(){
 
 function buildReplayHUD(){
   const rec = G.replay.rec;
+  const names = (rec.players && rec.players.length) ? rec.players : ['玩家'];
   let title;
-  if (rec.mode === 'single') title = rec.players[0] + ' · ' + (rec.diffName || '') + ' · 单人';
-  else title = rec.players[0] + ' vs ' + rec.players[1] + ' · 双人';
+  if (names.length <= 1) title = names[0] + ' · ' + (rec.diffName || '') + ' · 单人';
+  else title = names.join(' vs ') + ' · ' + (rec.diffName || '') +
+    (G.replay.from === 'online' ? ' · 联机回放' : ' · 双人');
+
+  /* 颜色图例：明确显示每条蛇是谁、什么颜色（单人/双人/联机一致） */
+  const hues = G.skinHues || [];
+  const legend = names.map(function(n, i){
+    const hue = (hues[i] !== undefined && hues[i] !== null) ? hues[i] : (i === 0 ? 152 : 212);
+    return '<span class="rp-chip" title="' + esc(n) + '">' +
+      '<i style="background:hsl(' + hue + ',72%,55%)"></i>' + esc(n) + '</span>';
+  }).join('');
 
   hudEl.innerHTML =
     '<div class="rp-bar">' +
       '<button class="btn-back" id="rpBack">退出回放</button>' +
       '<span class="rp-info">' + esc(title) + '</span>' +
+      '<span class="rp-legend">' + legend + '</span>' +
       '<span class="rp-score" id="rpScore">-</span>' +
     '</div>';
 

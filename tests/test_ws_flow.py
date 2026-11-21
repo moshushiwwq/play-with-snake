@@ -66,6 +66,8 @@ class TestMessageFlow(unittest.TestCase):
         self._send(self.b, {'t': 'join', 'code': code, 'name': '乙'})
         self._send(self.b, {'t': 'start'})
         self.assertIn('房主', self.b.last('err')['msg'])
+        self._send(self.a, {'t': 'ready', 'ready': True})
+        self._send(self.b, {'t': 'ready', 'ready': True})
         self._send(self.a, {'t': 'start'})
         self.assertIsNotNone(self.a.last('start'))
         self.assertIsNotNone(self.b.last('start'))
@@ -75,6 +77,8 @@ class TestMessageFlow(unittest.TestCase):
         self._send(self.a, {'t': 'create', 'name': '甲', 'maxPlayers': 2})
         code = self.a.last('room')['room']['code']
         self._send(self.b, {'t': 'join', 'code': code, 'name': '乙'})
+        self._send(self.a, {'t': 'ready', 'ready': True})
+        self._send(self.b, {'t': 'ready', 'ready': True})
         self._send(self.a, {'t': 'start'})
         for _ in range(80):
             self.svc.tick(20)
@@ -124,6 +128,8 @@ class TestMessageFlow(unittest.TestCase):
         self.assertEqual(room['map'], 'demo')
         self.assertEqual(room['mapName'], '演示')
         self._send(self.b, {'t': 'join', 'code': room['code'], 'name': '乙'})
+        self._send(self.a, {'t': 'ready', 'ready': True})
+        self._send(self.b, {'t': 'ready', 'ready': True})
         self._send(self.a, {'t': 'start'})
         self.assertIn('start', [m['t'] for m in self.a.sent])
 

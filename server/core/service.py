@@ -13,6 +13,7 @@ from shared.constants import DIFFS, MAX_ROOMS, ROOM_CODE_CHARS
 from server.core import world
 from server.core.protocol import handle_message
 from server.core.util import clean_name  # noqa: F401  （对外复用的工具函数）
+from server.store.replays import new_replay_id
 
 
 class GameService:
@@ -25,7 +26,7 @@ class GameService:
     """
 
     def __init__(self, leaderboard, online_board, ip_notes, custom_maps,
-                 snapshot_hz: int = 30, logger=None):
+                 snapshot_hz: int = 30, logger=None, replays=None):
         """初始化服务。
 
         Args:
@@ -35,11 +36,13 @@ class GameService:
             custom_maps: 自制地图存储。
             snapshot_hz: 快照频率。
             logger: 日志回调 fn(text, level='info')。
+            replays: 回放存储（ReplayStore 或 None，None 时只入榜不存回放）。
         """
         self.leaderboard = leaderboard
         self.online_board = online_board
         self.ip_notes = ip_notes
         self.custom_maps = custom_maps
+        self.replays = replays
         self.snapshot_hz = max(5, min(60, int(snapshot_hz or 30)))
         self.rooms: dict[str, object] = {}
         self.conns: set = set()
@@ -173,6 +176,52 @@ class GameService:
         for c in list(self.conns):
             if not getattr(c, 'closed', False) and getattr(c, 'room', None) is None:
                 c.send(msg)
+
+    # ---------------------------------------------------------------- 联机入榜
+    def publish_online_result(self, room, game) -> None:
+        """把一局联机对战的结果自动写入联机排行榜，并保存回放。
+
+        规则：
+        - 每位玩家各占一条记录，展示名称固定为该玩家的 IP；
+        - 同一 IP 同分数的记录只保留更早的那一条（新的直接丢弃）；
+        - 同一局的所有记录共享一条回放，联机榜可直接点开观看。
+
+        Args:
+            room: 结束对局的房间。
+            game: 已结束的对局（提供分数、长度与回放帧）。
+        """
+        payload = game.replay_payload()
+        rid = ''
+        if self.replays is not None:
+            try:
+                rid = new_replay_id()
+                if not self.replays.save(rid, payload):
+                    rid = ''
+            except Exception as e:
+                rid = ''
+                self.log('回放保存失败：%s' % e, 'warn')
+
+        rec = payload['rec']
+        for i, p in enumerate(room.players):
+            try:
+                score = int(rec['scores'][i] if i < len(rec['scores']) else 0)
+                length = int(rec['lens'][i] if i < len(rec['lens']) else 0)
+            except Exception:
+                score, length = 0, 0
+            ip = getattr(p.get('conn'), 'ip', '') or ''
+            r = self.online_board.submit_auto({
+                'mode': rec['mode'], 'diff': rec['diff'], 'mapId': rec['mapId'],
+                'mapName': rec['mapName'], 'players': rec['players'],
+                'scores': rec['scores'], 'lens': rec['lens'],
+                'duration': rec['duration'], 'date': rec['date'],
+            }, ip, score, length, rid)
+            if r.get('ok') and not r.get('dup'):
+                self.log('联机成绩自动入榜：%s %d 分（房间 %s）' % (ip or '未知IP', score, room.code))
+        try:
+            self.broadcast_all({'t': 'ob', 'top': self.online_board.top(30)})
+        except Exception:
+            pass
+        self._changed()
 
     # ---------------------------------------------------------------- 驱动
     def tick(self, dt_ms: float) -> None:

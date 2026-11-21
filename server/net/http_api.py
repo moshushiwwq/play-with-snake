@@ -160,6 +160,18 @@ class HttpApi:
                         rows = svc.online_board.top(30)
                     self._json({'ok': True, 'rows': rows})
                     return
+                if path == '/api/replay':
+                    rid = (qs.get('id') or [''])[0]
+                    payload = svc.replays.load(rid) if getattr(svc, 'replays', None) is not None else None
+                    if not payload:
+                        self._json({'ok': False, 'msg': '回放不存在或已被清理'}, 404)
+                        return
+                    self._json({
+                        'ok': True, 'id': rid,
+                        'rec': payload.get('rec') or {},
+                        'frames': payload.get('frames') or [],
+                    })
+                    return
                 if path == '/api/maps':
                     with svc.lock:
                         maps = svc.map_list()

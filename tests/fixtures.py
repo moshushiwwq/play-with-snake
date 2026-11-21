@@ -14,6 +14,7 @@ from server.store.custom_maps import CustomMaps
 from server.store.ip_notes import IpNotes
 from server.store.leaderboard import Leaderboard
 from server.store.online_board import OnlineBoard
+from server.store.replays import ReplayStore
 
 
 class FakeConn:
@@ -80,5 +81,6 @@ def make_service(tmpdir: str | None = None, snapshot_hz: int = 30, logger=None) 
     leaderboard = Leaderboard(d)
     custom_maps = CustomMaps(d)
     online_board = OnlineBoard(d, ip_notes)
+    replays = ReplayStore(d)
     return GameService(leaderboard, online_board, ip_notes, custom_maps,
-                       snapshot_hz=snapshot_hz, logger=logger)
+                       snapshot_hz=snapshot_hz, logger=logger, replays=replays)

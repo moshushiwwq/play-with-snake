@@ -37,6 +37,7 @@ from server.store.custom_maps import CustomMaps
 from server.store.ip_notes import IpNotes
 from server.store.leaderboard import Leaderboard
 from server.store.online_board import OnlineBoard
+from server.store.replays import ReplayStore
 from server.sys import autostart
 from server.sys.discovery import Discovery
 from server.sys.logs import LogBus
@@ -83,10 +84,12 @@ class ServerApp(QObject):
         self.leaderboard = Leaderboard(self.data_dir)
         self.custom_maps = CustomMaps(self.data_dir)
         self.online_board = OnlineBoard(self.data_dir, self.ip_notes)
+        self.replays = ReplayStore(self.data_dir)
         self.auth = PanelAuth(self.config.data.get('panelAuth'), self._persist_auth)
         self.service = GameService(
             self.leaderboard, self.online_board, self.ip_notes, self.custom_maps,
-            snapshot_hz=self.config.snapshot_hz, logger=self.logbus.push)
+            snapshot_hz=self.config.snapshot_hz, logger=self.logbus.push,
+            replays=self.replays)
         self.http = HttpApi(self.service, self.config, self.auth, APP_VERSION,
                             self.logbus.push, logbus=self.logbus)
         self.ws = WsServer(self.service, self.config)

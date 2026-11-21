@@ -29,6 +29,8 @@ class TestOnlineRules(unittest.TestCase):
         code = conns[0].room.code
         for c in conns[1:]:
             svc.handle(c, json.dumps({'t': 'join', 'code': code, 'name': c.name}, ensure_ascii=False))
+        for c in conns:
+            svc.handle(c, json.dumps({'t': 'ready', 'ready': True}))
         svc.handle(conns[0], json.dumps({'t': 'start'}))
         room = conns[0].room
         g = room.game
@@ -159,6 +161,8 @@ class TestOnlineRules(unittest.TestCase):
                                   'map': 'classic', 'diff': 'normal'}, ensure_ascii=False))
         code = a.room.code
         svc.handle(b, json.dumps({'t': 'join', 'code': code, 'name': '乙'}, ensure_ascii=False))
+        svc.handle(a, json.dumps({'t': 'ready', 'ready': True}, ensure_ascii=False))
+        svc.handle(b, json.dumps({'t': 'ready', 'ready': True}, ensure_ascii=False))
         svc.handle(a, json.dumps({'t': 'start'}))
         g = a.room.game
         speed = g.diff['speed']
