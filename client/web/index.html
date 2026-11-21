@@ -6012,11 +6012,14 @@ function updateHUD(){
   } else {
     /* 多人：逐位刷新名字与分数（2-4 人）；联机等级显示「我」的等级 */
     const n = Math.min((G.players || []).length, 4);
+    const me = hudMyIndex(n);
     let lv = 1;
     for (let i = 0; i < n; i++){
       set('hScore' + i, G.scores[i] || 0);
       const nm = $('hN' + i);
-      if (nm) nm.textContent = G.players[i] || ('P' + (i + 1));
+      /* 面板顺序对所有玩家一致，只在本地面板名后标注「我」 */
+      if (nm) nm.textContent = (G.players[i] || ('P' + (i + 1))) +
+        ((G.online && i === me) ? '（我）' : '');
       lv = Math.max(lv, G.levels[i] || 1);
     }
     set('hLevel', G.online ? (G.levels[hudMyIndex(n)] || 1) : lv);
@@ -6338,16 +6341,23 @@ function buildHUD(){
       '<button class="snd" id="soundBtn">' + (muted ? '静音' : '音效') + '</button>' +
     '</div>';
   } else {
-    /* 双人/多人（含联机 2-4 人）：第一排固定「我 / 对手 / 等级 / 暂停 / 音效」，
-       与双人对战同一套面板；3-4 人时其余玩家排到第二排，面板宽度与第一排一致 */
+    /* 双人/多人（含联机 2-4 人）：面板顺序对所有玩家完全一致（房主在前、按加入顺序），
+       颜色取该玩家实际的蛇色；「我」只在本地面板名后加标记，不改变任何人的排位。
+       第一排「玩家1 / 玩家2 / 等级 / 暂停 / 音效」，3-4 人时其余玩家排到第二排，宽度对齐 */
     const n = Math.max(2, (G.players || []).length || 2);
-    const me = hudMyIndex(n);
-    const order = [me];
-    for (let i = 0; i < n; i++) if (i !== me) order.push(i);
+    const order = [];
+    for (let i = 0; i < n; i++) order.push(i);
+    const tone = function(i){
+      if (!G.online) return '';
+      const hue = (G.skinHues && G.skinHues[i] !== undefined && G.skinHues[i] !== null)
+        ? G.skinHues[i] : (i === 0 ? 152 : 212);
+      return ' style="color:hsl(' + hue + ',68%,42%)"';
+    };
     const panel = function(i){
-      return '<div class="stat p' + (i === me ? 1 : 2) + '">' +
-        '<span class="label" id="hN' + i + '">P' + (i + 1) + '</span>' +
-        '<span class="val" id="hScore' + i + '">0</span></div>';
+      const cls = 'stat' + (G.online ? '' : (' p' + (i === 0 ? 1 : 2)));
+      return '<div class="' + cls + '">' +
+        '<span class="label" id="hN' + i + '"' + tone(i) + '>P' + (i + 1) + '</span>' +
+        '<span class="val" id="hScore' + i + '"' + tone(i) + '>0</span></div>';
     };
     const rightCells =
       '<div class="stat"><span class="label">等级</span><span class="val" id="hLevel">1</span></div>' +
