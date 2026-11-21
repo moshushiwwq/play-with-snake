@@ -153,5 +153,125 @@ class TestHttpApi(unittest.TestCase):
         self.assertEqual(code, 429)
 
 
+class TestHttpLogs(unittest.TestCase):
+    """管理面板日志接口：完整列表、级别过滤、下载与清空。"""
+
+    @classmethod
+    def setUpClass(cls):
+        """启动带 LogBus 的服务。"""
+        import tempfile
+
+        from server.sys.logs import LogBus
+
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.port = _free_port()
+        cls.svc = make_service()
+        cls.auth = PanelAuth(None, lambda params: None)
+        cls.cfg = NullConfig(cls.port, 18082)
+        cls.bus = LogBus(cls.tmp.name)
+        cls.api = HttpApi(cls.svc, cls.cfg, cls.auth, APP_VERSION,
+                          cls.bus.push, logbus=cls.bus)
+        ok, msg = cls.api.start()
+        assert ok, msg
+        cls.base = 'http://127.0.0.1:%d' % cls.port
+
+        cls.bus.push('服务器已启动', 'ok')
+        for i in range(12):
+            cls.bus.push('房间测试第 %d 条' % i)
+        cls.bus.push('端口占用', 'warn')
+        cls.bus.push('tick 异常', 'error')
+
+    @classmethod
+    def tearDownClass(cls):
+        """停止服务并清理临时目录。"""
+        cls.api.stop()
+        cls.tmp.cleanup()
+
+    def _get_json(self, path: str) -> tuple[int, dict]:
+        """GET 并解析 JSON。"""
+        req = urllib.request.Request(self.base + path)
+        try:
+            with urllib.request.urlopen(req, timeout=6) as r:
+                return r.status, json.loads(r.read().decode('utf-8'))
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read().decode('utf-8', 'replace') or '{}')
+
+    def _post_json(self, path: str, obj: dict) -> tuple[int, dict]:
+        """POST JSON。"""
+        data = json.dumps(obj).encode('utf-8')
+        req = urllib.request.Request(self.base + path, data=data,
+                                     headers={'Content-Type': 'application/json'})
+        try:
+            with urllib.request.urlopen(req, timeout=8) as r:
+                return r.status, json.loads(r.read().decode('utf-8'))
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read().decode('utf-8', 'replace') or '{}')
+
+    def test_full_list_and_levels(self):
+        """默认返回全部条目（含 level），并按级别过滤。"""
+        code, j = self._get_json('/api/logs?limit=200')
+        self.assertEqual(code, 200)
+        self.assertTrue(j['ok'])
+        self.assertEqual(j['source'], 'memory')
+        texts = {(e['text'], e['level']) for e in j['entries']}
+        self.assertIn(('服务器已启动', 'ok'), texts)
+        self.assertIn(('tick 异常', 'error'), texts)
+        self.assertIn(('房间测试第 0 条', 'info'), texts)
+        for i in range(12):
+            self.assertIn(('房间测试第 %d 条' % i, 'info'), texts)
+        self.assertIn('fileSize', j['stats'])
+
+        code, j = self._get_json('/api/logs?limit=200&level=error')
+        self.assertEqual(len(j['entries']), 1)
+        self.assertEqual(j['entries'][0]['text'], 'tick 异常')
+
+        code, j = self._get_json('/api/logs?limit=200&level=warn')
+        self.assertGreaterEqual(len(j['entries']), 1)
+        self.assertTrue(all(e['level'] in ('warn', 'error') for e in j['entries']))
+
+    def test_download_and_clear(self):
+        """下载返回整份 server.log；清空后文件归零、历史仍可在内存查看。"""
+        with urllib.request.urlopen(self.base + '/api/logs/download', timeout=8) as r:
+            body = r.read().decode('utf-8')
+        self.assertIn('服务器已启动', body)
+        self.assertIn('tick 异常', body)
+
+        code, j = self._post_json('/api/logs/clear', {})
+        self.assertEqual(code, 200)
+        self.assertTrue(j['ok'])
+        self.assertEqual(j['stats']['fileSize'], 0)
+
+        code, j = self._get_json('/api/logs?limit=200')
+        self.assertTrue(any(e['text'] == '服务器已启动' for e in j['entries']))
+
+
+class TestLogBus(unittest.TestCase):
+    """日志总线的读取与级别过滤（面板数据来源）。"""
+
+    def test_entries_filter_and_file(self):
+        """内存条目带级别；过滤无匹配时返回空列表，不会串到文件历史。"""
+        import tempfile
+
+        from server.sys.logs import LogBus
+
+        with tempfile.TemporaryDirectory() as d:
+            bus = LogBus(d)
+            bus.push('开局', 'ok')
+            bus.push('房间已创建')
+            bus.push('端口占用', 'warn')
+            self.assertEqual([e['text'] for e in bus.entries(10, 'error')], [])
+            self.assertEqual([e['text'] for e in bus.entries(10, 'warn')], ['端口占用'])
+            self.assertEqual([e['text'] for e in bus.entries(10, 'info')], ['开局', '房间已创建'])
+            self.assertEqual(len(bus.entries(10, 'all')), 3)
+            stats = bus.stats()
+            self.assertGreater(stats['fileSize'], 0)
+            self.assertEqual(stats['memory'], 3)
+            # 文件回读用于重启后回显历史
+            lines = bus.read_file(10)
+            self.assertEqual(len(lines), 3)
+            self.assertIn('端口占用', lines[-1]['text'])
+            self.assertTrue(lines[0]['ts'])
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -1,6 +1,9 @@
 # 构建与发布产物
-# exe 单文件产物体积较大，不纳入仓库；源码与构建脚本足以复现。
-release/
+# 服务端单文件 exe 随仓库发布（客户端 exe 仍然不入库，体积更大且非必需）；
+# 其余构建中间产物与构建日志不纳入仓库。
+release/*
+!release/PlayWithSnake-Server.exe
+!release/version.json
 build/dist/
 build/work/
 build/logs/

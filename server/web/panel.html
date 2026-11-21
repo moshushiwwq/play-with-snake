@@ -54,6 +54,17 @@ td.mono{font-family:ui-monospace,Consolas,monospace}
 .kv{display:flex;gap:8px;flex-wrap:wrap;font-size:12px;color:var(--ink3);margin-bottom:8px}
 .kv span{background:var(--field);border:1px solid var(--line-soft);border-radius:8px;padding:5px 10px}
 .ic{width:1.1em;height:1.1em;flex:none;vertical-align:-.18em;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.logmeta{font-size:11.5px;color:var(--dim);margin-bottom:8px;display:flex;gap:10px;flex-wrap:wrap}
+.logbox{max-height:360px;overflow:auto;background:#0f172a;border-radius:10px;padding:10px 12px;
+  font-family:ui-monospace,Consolas,"Courier New",monospace;font-size:12px;line-height:1.7;color:#c7d5ea}
+.logline{display:flex;gap:8px;white-space:pre-wrap;word-break:break-word}
+.logline .ts{color:#7c8aa5;flex:none}
+.logline .lv{flex:none;font-weight:800;width:40px}
+.logline .tx{flex:1}
+.logline.info .lv{color:#7fb3e8}
+.logline.ok .lv{color:#4ade80}
+.logline.warn .lv{color:#f5c05a}
+.logline.error .lv{color:#ff8080}
 @media (max-width:600px){
   body{padding:10px}
   .row{flex-direction:column;align-items:stretch}
@@ -173,6 +184,34 @@ td.mono{font-family:ui-monospace,Consolas,monospace}
     <div id="boardBox"><div class="empty">加载中…</div></div>
     <div class="note" style="margin-top:8px">异常数据（校验码不符）在服务端会被直接过滤，不会出现在榜单中。</div>
   </section>
+
+  <!-- 运行日志 -->
+  <section class="card" id="logCard">
+    <h2>
+      <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4.6h14v14.8H5z"/><path d="M7.8 9.4h8.4M7.8 12.6h8.4M7.8 15.8h5"/></svg>
+      运行日志
+    </h2>
+    <div class="row">
+      <label>显示级别</label>
+      <select id="logLevel">
+        <option value="all">全部</option>
+        <option value="info">信息 / 成功</option>
+        <option value="warn">警告 / 错误</option>
+        <option value="error">仅错误</option>
+      </select>
+      <button class="primary" id="btnLogRefresh">刷新</button>
+      <button id="btnLogDownload">下载完整日志</button>
+      <button class="danger" id="btnLogClear">清空日志</button>
+    </div>
+    <div class="switch">
+      <input type="checkbox" id="logAuto" checked>
+      <label for="logAuto">每 3 秒自动刷新，并自动滚到最新一条</label>
+    </div>
+    <div class="logmeta" id="logMeta">加载中…</div>
+    <div class="msg" id="logMsg"></div>
+    <div class="logbox" id="logBox"><div class="empty">加载中…</div></div>
+    <div class="note" style="margin-top:8px">这里显示本进程的完整日志（含时间与级别）；服务器重启前的历史在 server.log 文件里，可用「下载完整日志」取走。</div>
+  </section>
 </div>
 
 <script>
@@ -206,6 +245,7 @@ td.mono{font-family:ui-monospace,Consolas,monospace}
         $('loginCard').style.display = needLogin ? '' : 'none';
         $('accountCard').style.display = needLogin ? 'none' : '';
         $('settingsCard').style.display = needLogin ? 'none' : '';
+        $('logCard').style.display = needLogin ? 'none' : '';
         $('pwState').textContent = authState.enabled
           ? (authState.authed ? '已设置（已登录）' : '已设置（未登录）')
           : '未设置（任何能访问本机的人都可以修改设置）';
@@ -279,7 +319,7 @@ td.mono{font-family:ui-monospace,Consolas,monospace}
       if (j.ok){
         setMsg($('loginMsg'), '登录成功', 'ok');
         $('loginPass').value = '';
-        status().then(function(){ loadSettings(); loadBoard(); });
+        status().then(function(){ loadSettings(); loadBoard(); loadLogs(); startLogTimer(); });
       } else {
         setMsg($('loginMsg'), j.msg || '登录失败', 'err');
       }
@@ -321,13 +361,94 @@ td.mono{font-family:ui-monospace,Consolas,monospace}
     });
   };
 
+  var logTimer = null;
+  var logLevel = 'all';
+
+  function fmtSize(n){
+    n = Number(n) || 0;
+    if (n < 1024) return n + ' B';
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+    return (n / 1024 / 1024).toFixed(2) + ' MB';
+  }
+
+  function renderLogs(entries, stats, source){
+    var box = $('logBox');
+    var near = box.scrollTop + box.clientHeight >= box.scrollHeight - 32;
+    if (!entries.length){
+      box.innerHTML = '<div class="empty">' + (logLevel === 'all' ? '暂无日志' : '该级别暂无日志') + '</div>';
+    } else {
+      var tag = { info:'INFO', ok:'OK', warn:'WARN', error:'ERR' };
+      var html = '';
+      entries.forEach(function(it){
+        var lv = it.level || 'info';
+        if (tag[lv] === undefined) lv = 'info';
+        html += '<div class="logline ' + lv + '">' +
+          '<span class="ts">' + esc(it.ts || '-') + '</span>' +
+          '<span class="lv">' + tag[lv] + '</span>' +
+          '<span class="tx">' + esc(it.text || '') + '</span></div>';
+      });
+      box.innerHTML = html;
+    }
+    var meta = ['显示 ' + entries.length + ' 条'];
+    if (source === 'file') meta.push('来自日志文件（本进程暂无新日志）');
+    if (stats){
+      meta.push('内存 ' + (stats.memory || 0) + '/' + (stats.maxMemory || 0) + ' 条');
+      meta.push('server.log ' + fmtSize(stats.fileSize));
+      if (stats.backupSize) meta.push('历史备份 ' + fmtSize(stats.backupSize));
+    }
+    $('logMeta').innerHTML = meta.map(function(t){ return '<span>' + esc(t) + '</span>'; }).join('');
+    if ($('logAuto').checked || near) box.scrollTop = box.scrollHeight;
+  }
+
+  function loadLogs(){
+    if (authenticated() === false) return Promise.resolve();
+    return fetch('/api/logs?limit=800&level=' + logLevel, { cache:'no-store' })
+      .then(function(r){
+        if (r.status === 401) throw new Error('需要登录后查看日志');
+        return r.json();
+      })
+      .then(function(j){
+        if (!j || !j.ok) throw new Error((j && j.msg) || '日志加载失败');
+        renderLogs(j.entries || [], j.stats || null, j.source || 'memory');
+      })
+      .catch(function(e){
+        $('logMeta').textContent = e.message || '日志加载失败';
+        $('logBox').innerHTML = '<div class="empty">' + esc(e.message || '日志加载失败') + '</div>';
+      });
+  }
+
+  function startLogTimer(){
+    if (logTimer) return;
+    logTimer = setInterval(function(){
+      if ($('logAuto').checked) loadLogs();
+    }, 3000);
+  }
+
+  function authenticated(){
+    return authState.authed || !authState.enabled;
+  }
+
+  $('logLevel').onchange = function(){
+    logLevel = $('logLevel').value;
+    loadLogs();
+  };
+  $('btnLogRefresh').onclick = function(){ loadLogs(); };
+  $('btnLogDownload').onclick = function(){ window.open('/api/logs/download', '_blank'); };
+  $('btnLogClear').onclick = function(){
+    if (!confirm('确定清空 server.log 吗？本机保存的日志历史会一并删除。')) return;
+    post('/api/logs/clear', {}).then(function(j){
+      setMsg($('logMsg'), j.msg || (j.ok ? '已清空' : '清空失败'), j.ok ? 'ok' : 'err');
+      loadLogs();
+    });
+  };
+
   $('btnLogout').onclick = function(){
     post('/api/auth/logout', {}).then(function(){ status(); });
   };
-  $('btnRefresh').onclick = function(){ status().then(function(){ loadSettings(); loadBoard(); }); };
+  $('btnRefresh').onclick = function(){ status().then(function(){ loadSettings(); loadBoard(); loadLogs(); }); };
 
   status().then(function(st){
-    if (!st.enabled || st.authed){ loadSettings(); loadBoard(); }
+    if (!st.enabled || st.authed){ loadSettings(); loadBoard(); loadLogs(); startLogTimer(); }
   });
 })();
 </script>

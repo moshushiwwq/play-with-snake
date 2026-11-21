@@ -38,7 +38,7 @@ def _read_cookie(header: str | None, name: str) -> str:
 class HttpApi:
     """HTTP 服务（页面 + REST + 面板）。"""
 
-    def __init__(self, service, config, auth, version: str, logger=None):
+    def __init__(self, service, config, auth, version: str, logger=None, logbus=None):
         """初始化。
 
         Args:
@@ -47,12 +47,14 @@ class HttpApi:
             auth: PanelAuth。
             version: 版本号。
             logger: 日志回调 fn(text, level)。
+            logbus: LogBus（用于管理面板读取完整日志，可为空）。
         """
         self.service = service
         self.config = config
         self.auth = auth
         self.version = version
         self.logger = logger
+        self.logbus = logbus
         self._httpd: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
 
@@ -188,6 +190,49 @@ class HttpApi:
                         rows = svc.leaderboard.top(30)
                     self._json({'ok': True, 'rows': rows})
                     return
+                if path == '/api/logs':
+                    if not api.auth.authed(self._token()):
+                        self._json({'ok': False, 'msg': '需要登录'}, 401)
+                        return
+                    bus = api.logbus
+                    if bus is None:
+                        self._json({'ok': False, 'msg': '日志不可用'}, 200)
+                        return
+                    try:
+                        limit = int((qs.get('limit') or ['500'])[0])
+                    except Exception:
+                        limit = 500
+                    level = (qs.get('level') or ['all'])[0]
+                    items = bus.entries(limit, level)
+                    source = 'memory'
+                    if not items and str(level).lower() in ('', 'all'):
+                        items = bus.read_file(limit)
+                        source = 'file'
+                    self._json({'ok': True, 'entries': items, 'source': source, 'stats': bus.stats()})
+                    return
+                if path == '/api/logs/download':
+                    if not api.auth.authed(self._token()):
+                        self._json({'ok': False, 'msg': '需要登录'}, 401)
+                        return
+                    bus = api.logbus
+                    if bus is None or not os.path.exists(bus.path):
+                        self._json({'ok': False, 'msg': '还没有日志文件'}, 404)
+                        return
+                    try:
+                        with open(bus.path, 'rb') as f:
+                            data = f.read()
+                    except Exception as e:
+                        self._json({'ok': False, 'msg': '日志读取失败：%s' % e}, 500)
+                        return
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'text/plain; charset=utf-8')
+                    self.send_header('Content-Disposition', 'attachment; filename="server.log"')
+                    self.send_header('Content-Length', str(len(data)))
+                    self.send_header('Cache-Control', 'no-store')
+                    self._cors()
+                    self.end_headers()
+                    self.wfile.write(data)
+                    return
                 self._json({'ok': False, 'msg': 'Not Found'}, 404)
 
             # -------------------------------------------------- POST
@@ -295,6 +340,20 @@ class HttpApi:
 
                 if path == '/api/auth/logout':
                     self._json({'ok': True}, 200, {'Set-Cookie': COOKIE_NAME + '=; Path=/; Max-Age=0; HttpOnly'})
+                    return
+
+                if path == '/api/logs/clear':
+                    if not api.auth.authed(self._token()):
+                        self._json({'ok': False, 'msg': '需要登录'}, 401)
+                        return
+                    bus = api.logbus
+                    if bus is None:
+                        self._json({'ok': False, 'msg': '日志不可用'}, 200)
+                        return
+                    (api.logger or svc.log)('日志文件已由管理面板清空', 'warn')
+                    bus.clear_file()
+                    self._json({'ok': True, 'msg': '日志文件已清空（本机历史一并删除）',
+                                'stats': bus.stats()})
                     return
 
                 self._json({'ok': False, 'msg': 'Not Found'}, 404)

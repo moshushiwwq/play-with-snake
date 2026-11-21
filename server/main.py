@@ -87,7 +87,8 @@ class ServerApp(QObject):
         self.service = GameService(
             self.leaderboard, self.online_board, self.ip_notes, self.custom_maps,
             snapshot_hz=self.config.snapshot_hz, logger=self.logbus.push)
-        self.http = HttpApi(self.service, self.config, self.auth, APP_VERSION, self.logbus.push)
+        self.http = HttpApi(self.service, self.config, self.auth, APP_VERSION,
+                            self.logbus.push, logbus=self.logbus)
         self.ws = WsServer(self.service, self.config)
         self.ws.logged.connect(self.logbus.push)
         self.discovery: Discovery | None = None

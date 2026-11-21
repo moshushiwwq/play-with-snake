@@ -91,6 +91,85 @@ class LogBus:
         with self._lock:
             return self._recent[-limit:]
 
+    def entries(self, limit: int = 300, level: str = 'all') -> list[dict]:
+        """读取日志（可按级别过滤），供管理面板拉取完整列表。
+
+        Args:
+            limit: 最多返回的条数（不超过内存上限）。
+            level: all / info（含成功）/ warn（警告与错误）/ error。
+
+        Returns:
+            日志项列表（时间从旧到新）。
+        """
+        with self._lock:
+            items = list(self._recent)
+        want = {
+            'warn': ('warn', 'error'),
+            'error': ('error',),
+            'info': ('info', 'ok'),
+        }.get(str(level or 'all').lower())
+        if want:
+            items = [it for it in items if it.get('level') in want]
+        cap = max(1, min(int(limit or 300), self._max))
+        return items[-cap:]
+
+    def stats(self) -> dict:
+        """返回日志存储状态（内存条数、文件大小、路径）。
+
+        Returns:
+            状态字典。
+        """
+        with self._lock:
+            memory = len(self._recent)
+        size = self._size(self.path)
+        backup = self._size(self.path + '.1')
+        return {
+            'memory': memory, 'maxMemory': self._max,
+            'fileSize': size, 'backupSize': backup,
+            'name': os.path.basename(self.path),
+        }
+
+    @staticmethod
+    def _size(path: str) -> int:
+        """安全读取文件大小（不存在返回 0）。
+
+        Args:
+            path: 文件路径。
+
+        Returns:
+            字节数。
+        """
+        try:
+            return os.path.getsize(path) if os.path.exists(path) else 0
+        except Exception:
+            return 0
+
+    def read_file(self, limit: int = 800) -> list[dict]:
+        """读取日志文件尾部（进程重启后内存为空时用于回显历史）。
+
+        Args:
+            limit: 最多返回的行数。
+
+        Returns:
+            日志项列表（时间从旧到新，级别未知记为 info）。
+        """
+        try:
+            with open(self.path, 'r', encoding='utf-8', errors='replace') as f:
+                lines = f.readlines()
+        except Exception:
+            return []
+        out = []
+        for line in lines[-max(1, limit):]:
+            text = line.rstrip('\n')
+            if not text:
+                continue
+            ts, body = '', text
+            if text.startswith('[') and ']' in text:
+                ts, _, body = text[1:].partition(']')
+                body = body.strip()
+            out.append({'ts': ts, 'level': 'info', 'text': body})
+        return out
+
     def clear_file(self) -> None:
         """清空日志文件（保留内存记录）。"""
         try:
