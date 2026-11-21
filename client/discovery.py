@@ -6,7 +6,8 @@
     · 自动发现局域网内的服务器（含 HTTP/WS 端口与房间人数）；
     · 把用户手填的「IP」或「IP:端口」解析成真实的 HTTP 端口与 WS 端口。
 
-注意：UDP 广播与 HTTP 探测都是阻塞操作，界面侧应放到后台线程（见 client/bridge.py）。
+注意：UDP 广播与 HTTP 探测都是阻塞操作，由本地回环 PageServer 的请求线程调用，
+浏览器页面通过 /discover 代理端点获取结果。
 """
 from __future__ import annotations
 
@@ -117,11 +118,12 @@ def _normalize(info: dict, host: str, source: str) -> dict:
 class ServerFinder:
     """局域网服务器发现与端口解析。"""
 
-    def scan(self, timeout: float = 2.5) -> list[dict]:
-        """扫描局域网服务器（UDP 广播 + 本机 HTTP 探测）。
+    def scan(self, timeout: float = 2.5, hint: str = '') -> list[dict]:
+        """扫描局域网服务器（UDP 广播 + 本机 HTTP + 上次地址探测）。
 
         Args:
             timeout: 总耗时上限（秒）。
+            hint: 上次连接的服务器地址（"IP" 或 "IP:端口"）。
 
         Returns:
             去重后的服务器列表，本机服务器排在前面。
@@ -129,6 +131,7 @@ class ServerFinder:
         found: dict[tuple[str, int], dict] = {}
         self._scan_udp(found, timeout)
         self._scan_http(found)
+        self._scan_hint(found, hint)
         return sorted(found.values(), key=lambda s: (s['host'] != '127.0.0.1', s['host']))
 
     def _scan_udp(self, found: dict, timeout: float) -> None:
@@ -205,6 +208,45 @@ class ServerFinder:
         if info:
             srv = _normalize(info, '127.0.0.1', 'http')
             found.setdefault((srv['host'], srv['wsPort']), srv)
+
+    def _scan_hint(self, found: dict, hint: str) -> None:
+        """探测上次连接过的服务器地址（UDP 被防火墙拦截时的兜底）。
+
+        Args:
+            found: 结果累加字典。
+            hint: "IP"、"IP:端口" 或完整 URL。
+        """
+        raw = str(hint or '').strip()
+        for prefix in ('ws://', 'wss://', 'http://', 'https://'):
+            if raw.lower().startswith(prefix):
+                raw = raw[len(prefix):]
+        raw = raw.strip().rstrip('/').split('/')[0]
+        if not raw:
+            return
+        parts = raw.split(':')
+        host = parts[0] or '127.0.0.1'
+        if any(h == host for h, _ in found):
+            return
+        given = 0
+        if len(parts) > 1:
+            try:
+                given = int(parts[1])
+            except ValueError:
+                given = 0
+        ports: list[int] = []
+        if given:
+            ports.append(given)
+            if given > 1:
+                ports.append(given - 1)
+        for port in (DEFAULT_HTTP_PORT, DEFAULT_WS_PORT):
+            if port not in ports:
+                ports.append(port)
+        for port in ports:
+            info = http_discover(host, port, timeout=0.6)
+            if info:
+                srv = _normalize(info, host, 'http')
+                found.setdefault((srv['host'], srv['wsPort']), srv)
+                return
 
     def resolve(self, text: str, timeout: float = 1.0) -> dict:
         """把用户输入的地址解析成真实的 HTTP / WS 端口。

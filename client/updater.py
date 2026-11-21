@@ -8,7 +8,7 @@ from shared.version import APP_VERSION
 
 
 DEFAULT_MANIFEST_URL = (
-    'https://raw.githubusercontent.com/play-with-snake/play-with-snake/main/release/version.json'
+    'https://raw.githubusercontent.com/moshushiwwq/play-with-snake/main/release/version.json'
 )
 
 

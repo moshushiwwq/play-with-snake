@@ -41,6 +41,15 @@ class ClientConfig:
         self.s.sync()
 
     @property
+    def splash(self) -> bool:
+        """启动时是否播放开场动画。"""
+        return bool(self.get('ui/splash', True))
+
+    def set_splash(self, on: bool) -> None:
+        """设置启动动画开关。"""
+        self.set('ui/splash', bool(on))
+
+    @property
     def start_hidden(self) -> bool:
         """是否启动即隐藏到托盘。"""
         return bool(self.get('ui/start_hidden', False))

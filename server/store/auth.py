@@ -1,10 +1,14 @@
-"""服务端访问密码：scrypt 高强度哈希、会话 Cookie、失败递增锁定。
+"""服务端管理员账号：scrypt 高强度哈希、会话 Cookie、失败递增锁定。
 
 安全要点：
     · 密码绝不落明文，只保存盐与 scrypt 参数；
     · 使用 hmac.compare_digest 做恒定时间比对，防止时序侧信道；
     · 会话 token 为 24 字节随机数，12 小时过期，httpOnly Cookie；
     · 连续失败 5 次起锁定，时长从 60 秒翻倍，最长 15 分钟。
+
+账号由「用户名 + 密码」组成；用户名与密码都可在管理面板修改。
+未设置过密码时视为开放状态（任何能访问本机的人都可进入面板），
+与历史版本行为保持兼容。
 """
 from __future__ import annotations
 
@@ -15,17 +19,18 @@ import time
 
 SESSION_MS = 12 * 3600 * 1000
 COOKIE_NAME = 'snake_panel'
+DEFAULT_USER = 'admin'
 
 
 class PanelAuth:
-    """控制台访问密码管理。"""
+    """管理员账号与会话管理。"""
 
     def __init__(self, config: dict | None, persist):
         """初始化。
 
         Args:
-            config: 已保存的密码参数 {salt,hash,N,r,p} 或 None。
-            persist: 持久化回调 fn(params)，用于把新密码写入配置。
+            config: 已保存的账号参数 {salt,hash,N,r,p,user} 或 None。
+            persist: 持久化回调 fn(params)，用于把新账号写入配置。
         """
         cfg = config or {}
         self.salt = str(cfg.get('salt') or '')
@@ -33,6 +38,7 @@ class PanelAuth:
         self.n = int(cfg.get('N') or 16384)
         self.r = int(cfg.get('r') or 8)
         self.p = int(cfg.get('p') or 1)
+        self.user = str(cfg.get('user') or '')
         self.sessions: dict[str, int] = {}
         self.fails: dict[str, dict] = {}
         self._persist = persist
@@ -46,7 +52,12 @@ class PanelAuth:
         """导出可持久化的参数（未设置时返回 None）。"""
         if not self.enabled():
             return None
-        return {'salt': self.salt, 'hash': self.hash, 'N': self.n, 'r': self.r, 'p': self.p}
+        return {'salt': self.salt, 'hash': self.hash, 'N': self.n, 'r': self.r,
+                'p': self.p, 'user': self.user}
+
+    def username(self) -> str:
+        """当前管理员用户名（未设置时返回默认用户名）。"""
+        return self.user or DEFAULT_USER
 
     # ---------------------------------------------------------------- 密码
     def compute(self, password: str, salt: str) -> str:
@@ -62,10 +73,13 @@ class PanelAuth:
         return hashlib.scrypt(str(password).encode('utf-8'), salt=salt.encode('utf-8'),
                               n=self.n, r=self.r, p=self.p, dklen=64).hex()
 
-    def verify(self, password: str) -> bool:
-        """校验密码（未设置密码时恒为真）。
+    def verify(self, username: str = '', password: str = '') -> bool:
+        """校验账号（未设置密码时恒为真）。
+
+        兼容历史调用：若只传入一个位置参数，按密码处理。
 
         Args:
+            username: 用户名。
             password: 明文密码。
 
         Returns:
@@ -73,29 +87,57 @@ class PanelAuth:
         """
         if not self.enabled():
             return True
+        # 兼容旧签名 verify(password)：第二个参数缺省时第一个参数视为密码
+        if password == '' and username and not self.user:
+            password = username
+            username = ''
+        if self.user and str(username or '') != self.user:
+            return False
         try:
-            calc = self.compute(password, self.salt)
+            calc = self.compute(str(password or ''), self.salt)
             return hmac.compare_digest(calc, self.hash)
         except Exception:
             return False
 
     def set_password(self, new_password: str) -> None:
-        """设置/修改/清除密码（空字符串表示清除）。
+        """只设置/修改/清除密码（保留现有用户名）。
 
         Args:
-            new_password: 新密码。
+            new_password: 新密码，空字符串表示清除。
         """
         pwd = str(new_password or '')
         if not pwd:
-            self.salt = ''
-            self.hash = ''
-            self.sessions.clear()
-            self._persist(None)
+            self._clear()
             return
         self.salt = secrets.token_hex(16)
         self.hash = self.compute(pwd, self.salt)
         self.sessions.clear()
         self._persist(self.params())
+
+    def set_account(self, username: str, new_password: str) -> None:
+        """设置用户名与密码；空密码表示清除账号保护。
+
+        Args:
+            username: 新用户名（空则回退默认 admin）。
+            new_password: 新密码，空字符串表示清除。
+        """
+        pwd = str(new_password or '')
+        if not pwd:
+            self._clear()
+            return
+        self.user = str(username or DEFAULT_USER).strip() or DEFAULT_USER
+        self.salt = secrets.token_hex(16)
+        self.hash = self.compute(pwd, self.salt)
+        self.sessions.clear()
+        self._persist(self.params())
+
+    def _clear(self) -> None:
+        """清除账号保护并落盘。"""
+        self.salt = ''
+        self.hash = ''
+        self.user = ''
+        self.sessions.clear()
+        self._persist(None)
 
     # ---------------------------------------------------------------- 会话
     def issue(self) -> str:

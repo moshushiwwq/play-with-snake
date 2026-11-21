@@ -12,7 +12,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 from server.paths import resource_path
-from server.store.auth import COOKIE_NAME
+from server.store.auth import COOKIE_NAME, DEFAULT_USER
+from server.sys import autostart
 
 
 def _read_cookie(header: str | None, name: str) -> str:
@@ -169,7 +170,15 @@ class HttpApi:
                     self._json({'ok': bool(m), 'map': m} if m else {'ok': False, 'msg': '地图不存在'})
                     return
                 if path == '/api/auth/status':
-                    self._json({'ok': True, 'enabled': api.auth.enabled(), 'authed': api.auth.authed(self._token())})
+                    self._json({'ok': True, 'enabled': api.auth.enabled(),
+                                'authed': api.auth.authed(self._token()),
+                                'user': api.auth.username()})
+                    return
+                if path == '/api/server/settings':
+                    if not api.auth.authed(self._token()):
+                        self._json({'ok': False, 'msg': '需要登录'}, 401)
+                        return
+                    self._json({'ok': True, 'settings': api.server_settings()})
                     return
                 if path == '/api/leaderboard':
                     if not api.auth.authed(self._token()):
@@ -237,16 +246,18 @@ class HttpApi:
                     if left > 0:
                         self._json({'ok': False, 'msg': '尝试过于频繁，请 %d 秒后再试' % left}, 429)
                         return
-                    if not api.auth.verify(body.get('password') or ''):
+                    username = str(body.get('username') or '').strip()
+                    password = str(body.get('password') or '')
+                    if not api.auth.verify(username, password):
                         api.auth.fail(ip)
                         lk = api.auth.locked_for(ip)
                         (api.logger or svc.log)('控制台登录失败：来自 %s%s' % (
                             ip, '，已锁定 %d 秒' % lk if lk else ''), 'warn')
-                        self._json({'ok': False, 'msg': ('密码错误，已锁定 %d 秒' % lk) if lk else '密码错误'}, 401)
+                        self._json({'ok': False, 'msg': ('账号或密码错误，已锁定 %d 秒' % lk) if lk else '账号或密码错误'}, 401)
                         return
                     api.auth.reset_fail(ip)
                     token = api.auth.issue()
-                    self._json({'ok': True, 'msg': '登录成功'},
+                    self._json({'ok': True, 'msg': '登录成功', 'user': api.auth.username()},
                                extra={'Set-Cookie': api.auth.cookie_header(token)})
                     return
 
@@ -257,18 +268,29 @@ class HttpApi:
                         if left > 0:
                             self._json({'ok': False, 'msg': '尝试过于频繁，请 %d 秒后再试' % left}, 429)
                             return
-                        if not api.auth.verify(body.get('oldPassword') or ''):
+                        if not api.auth.verify(api.auth.username(), body.get('oldPassword') or ''):
                             api.auth.fail(ip)
                             lk = api.auth.locked_for(ip)
                             self._json({'ok': False, 'msg': ('旧密码错误，已锁定 %d 秒' % lk) if lk else '旧密码错误'}, 403)
                             return
                         api.auth.reset_fail(ip)
-                    api.auth.set_password(body.get('newPassword') or '')
+                    new_user = str(body.get('username') or api.auth.username() or DEFAULT_USER).strip()
+                    new_pwd = str(body.get('newPassword') or '')
+                    api.auth.set_account(new_user, new_pwd)
                     api.config.data['panelAuth'] = api.auth.params()
                     api.config.save()
-                    (api.logger or svc.log)('控制台访问密码已%s' % (
-                        '设置/修改' if body.get('newPassword') else '清除'), 'warn')
-                    self._json({'ok': True, 'msg': '密码已保存' if body.get('newPassword') else '密码已清除'})
+                    (api.logger or svc.log)('管理员账号已%s' % (
+                        '设置/修改' if new_pwd else '清除'), 'warn')
+                    self._json({'ok': True, 'msg': '账号已保存' if new_pwd else '账号保护已清除',
+                                'user': api.auth.username()})
+                    return
+
+                if path == '/api/server/settings':
+                    if not api.auth.authed(self._token()):
+                        self._json({'ok': False, 'msg': '需要登录'}, 401)
+                        return
+                    msg = api.apply_settings(body)
+                    self._json({'ok': True, 'msg': msg, 'settings': api.server_settings()})
                     return
 
                 if path == '/api/auth/logout':
@@ -289,6 +311,61 @@ class HttpApi:
                                         name='snake-http')
         self._thread.start()
         return True, 'HTTP 服务已启动：%d' % self.config.port
+
+    # ---------------------------------------------------------------- 设置
+    def server_settings(self) -> dict:
+        """汇总面板需要展示的服务端设置（含当前自启动形态与权限）。"""
+        cfg = self.config.data if isinstance(self.config.data, dict) else {}
+        try:
+            mode = autostart.query()
+        except Exception:
+            mode = str(cfg.get('autostart') or 'none')
+        try:
+            admin = autostart.is_admin()
+        except Exception:
+            admin = False
+        return {
+            'port': self.config.port,
+            'wsPort': self.config.ws_port,
+            'autostart': str(cfg.get('autostart') or 'none'),
+            'autostartMode': mode,
+            'discovery': bool(cfg.get('discovery', True)),
+            'splashServer': bool(cfg.get('splashServer', True)),
+            'splashClient': bool(cfg.get('splashClient', True)),
+            'admin': admin,
+            'version': self.version,
+        }
+
+    def apply_settings(self, body: dict) -> str:
+        """应用面板提交的设置项，返回结果说明文本。
+
+        Args:
+            body: 请求体，可含 autostart / discovery / splashServer / splashClient。
+        """
+        cfg = self.config.data if isinstance(self.config.data, dict) else {}
+        msgs: list[str] = []
+
+        if 'discovery' in body:
+            cfg['discovery'] = bool(body.get('discovery'))
+            msgs.append('内网发现已' + ('开启' if cfg['discovery'] else '关闭'))
+        if 'splashServer' in body:
+            cfg['splashServer'] = bool(body.get('splashServer'))
+            msgs.append('服务端启动动画已' + ('开启' if cfg['splashServer'] else '关闭'))
+        if 'splashClient' in body:
+            cfg['splashClient'] = bool(body.get('splashClient'))
+            msgs.append('客户端启动动画已' + ('开启' if cfg['splashClient'] else '关闭'))
+
+        target_mode = str(body.get('autostart') or '').strip()
+        if target_mode in ('none', 'logon', 'boot'):
+            old_mode = str(cfg.get('autostart') or 'none')
+            cfg['autostart'] = target_mode
+            if target_mode != old_mode or autostart.query() != target_mode:
+                ok, msg = autostart.apply(target_mode)
+                msgs.append(msg)
+                if not ok:
+                    cfg['autostart'] = old_mode
+        self.config.save()
+        return '；'.join(msgs) or '设置已保存'
 
     def stop(self) -> None:
         """停止 HTTP 服务。"""

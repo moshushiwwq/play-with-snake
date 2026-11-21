@@ -15,6 +15,8 @@ DEFAULTS = {
     'autostart': 'none',      # none | logon | boot
     'bind': '0.0.0.0',
     'panelAuth': None,
+    'splashServer': True,    # 服务端后台启动是否播放提示动画/气泡
+    'splashClient': True,     # 客户端启动动画默认开关
 }
 
 
@@ -43,6 +45,8 @@ class Config:
         self.data['snapshotHz'] = max(5, min(60, hz))
         self.data['discovery'] = bool(self.data.get('discovery', True))
         self.data['trayStart'] = bool(self.data.get('trayStart', False))
+        self.data['splashServer'] = bool(self.data.get('splashServer', True))
+        self.data['splashClient'] = bool(self.data.get('splashClient', True))
         if self.data.get('autostart') not in ('none', 'logon', 'boot'):
             self.data['autostart'] = 'none'
 

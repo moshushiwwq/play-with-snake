@@ -1,9 +1,13 @@
-"""服务端入口：装配配置、存储、网络服务、Qt 界面与托盘。
+"""服务端入口：后台驻留的 HTTP / WebSocket / 内网发现服务 + 系统托盘。
 
 运行方式：
-    python server/main.py                 # 正常启动（自动开启 HTTP/WS/内网发现）
-    python server/main.py --tray          # 启动后隐藏到系统托盘
+    python server/main.py                 # 启动后直接后台运行（托盘常驻，不弹窗口）
+    python server/main.py --tray         # 同默认（后台驻留）
+    python server/main.py --no-tray      # 不显示托盘图标
     python server/main.py --port 8080 --ws-port 8081
+
+管理面板通过客户端「管理员选项」或托盘菜单在外部浏览器中打开
+（http://127.0.0.1:<http端口>/panel），程序本身不再内嵌网页控件。
 """
 from __future__ import annotations
 
@@ -12,18 +16,10 @@ import os
 import sys
 import time
 
-from PyQt6.QtCore import QObject, Qt, QTimer
-from PyQt6.QtWidgets import QApplication, QMessageBox
+from PyQt6.QtCore import Qt, QObject, QTimer, QUrl
+from PyQt6.QtGui import QDesktopServices
+from PyQt6.QtWidgets import QApplication
 
-# 必须在创建 QApplication 之前设置（QWebEngineView 需要共享 OpenGL 上下文），
-# 同时要早于任何 QtWebEngine 模块的导入。
-QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts, True)
-
-# 与客户端一致：部分环境会阻止 Chromium 渲染进程启用沙箱，导致「访问密码与排行榜」
-# 面板空白。服务器只渲染本地面板页面，因此默认关闭渲染沙箱，可用同名环境变量覆盖。
-os.environ.setdefault('QTWEBENGINE_CHROMIUM_FLAGS', '--no-sandbox')
-
-# 让 `python server/main.py` 也能导入 shared/ 与 server/
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
@@ -31,9 +27,8 @@ if ROOT not in sys.path:
 from shared.version import APP_VERSION
 from server.config import Config
 from server.core.service import GameService
-from server.gui.theme import QSS
-from server.gui.tray import Tray
-from server.gui.window import ServerWindow
+from server.gui.log_window import LogWindow
+from server.gui.tray import Tray, local_ipv4
 from server.net.http_api import HttpApi
 from server.net.ws_server import WsServer
 from server.paths import data_dir
@@ -59,14 +54,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p = argparse.ArgumentParser(description='Play With Snake 服务器')
     p.add_argument('--port', type=int, default=None, help='HTTP 端口（默认 8080）')
     p.add_argument('--ws-port', type=int, default=None, help='WebSocket 端口（默认 8081）')
-    p.add_argument('--tray', action='store_true', help='启动后隐藏到系统托盘')
+    p.add_argument('--tray', action='store_true', help='启动后隐藏到系统托盘（默认即后台）')
     p.add_argument('--no-tray', action='store_true', help='禁用系统托盘')
-    p.add_argument('--shot', default='', help='启动后截图到指定路径并退出（自检用）')
     return p.parse_args(argv)
 
 
 class ServerApp(QObject):
-    """应用上下文：持有全部服务对象与定时器。"""
+    """应用上下文：持有全部服务对象、定时器与托盘。"""
 
     def __init__(self, args: argparse.Namespace):
         """装配所有组件。
@@ -98,8 +92,9 @@ class ServerApp(QObject):
         self.ws.logged.connect(self.logbus.push)
         self.discovery: Discovery | None = None
         self.started_at = 0.0
+        self.launched_at = time.time()
         self.tray: Tray | None = None
-        self.window: ServerWindow | None = None
+        self.log_window: LogWindow | None = None
         self.admin = autostart.is_admin()
 
         self._tick_timer = QTimer(self)
@@ -109,7 +104,7 @@ class ServerApp(QObject):
         self._last_tick = time.time()
 
     def _persist_auth(self, params) -> None:
-        """把新的密码参数写入配置。"""
+        """把新的账号参数写入配置。"""
         self.config.data['panelAuth'] = params
         self.config.save()
 
@@ -123,6 +118,18 @@ class ServerApp(QObject):
     def ws_running(self) -> bool:
         """WebSocket 服务是否在运行。"""
         return self.ws.server is not None
+
+    def _open_firewall(self) -> None:
+        """启动后尝试放行局域网所需端口（TCP HTTP/WS + UDP 发现）。
+
+        非管理员或非 Windows 时仅记录提示，不中断服务。这是修复
+        「UDP 广播能搜到服务器、但 TCP/WebSocket 连不上」的关键一步。
+        """
+        try:
+            ok, msg = autostart.firewall(True, (self.config.port, self.config.ws_port))
+            self.logbus.push(msg, 'ok' if ok else 'warn')
+        except Exception as e:
+            self.logbus.push('防火墙放行跳过：%s' % e, 'warn')
 
     def start_services(self) -> tuple[bool, str]:
         """启动 HTTP、WebSocket 与内网发现。
@@ -151,6 +158,7 @@ class ServerApp(QObject):
             self.discovery.start()
             self.logbus.push('内网自动发现已开启（UDP 41999）', 'ok')
         self.logbus.push('服务器已启动：HTTP %d / WS %d' % (self.config.port, self.config.ws_port), 'ok')
+        self._open_firewall()
         self._tick_timer.start()
         if self.tray:
             self.tray.set_running(True)
@@ -172,6 +180,24 @@ class ServerApp(QObject):
         """服务已运行的毫秒数。"""
         return int((time.time() - self.started_at) * 1000) if self.started_at else 0
 
+    def total_uptime_ms(self) -> int:
+        """程序自启动以来的总运行毫秒数（停止服务后仍继续累计）。"""
+        return int((time.time() - self.launched_at) * 1000)
+
+    def tray_info(self) -> dict:
+        """托盘菜单展示所需的运行状态。
+
+        Returns:
+            含运行状态、总运行时长、局域网地址与端口。
+        """
+        return {
+            'running': self.http_running and self.ws_running,
+            'uptime_ms': self.total_uptime_ms(),
+            'addresses': local_ipv4(),
+            'http_port': self.config.port,
+            'ws_port': self.config.ws_port,
+        }
+
     def _discover_payload(self) -> dict:
         """内网发现响应内容。"""
         return self.service.discover_info(APP_VERSION, self.config.port, self.config.ws_port)
@@ -186,49 +212,56 @@ class ServerApp(QObject):
         except Exception as e:
             self.logbus.push('tick 异常：%s' % e, 'error')
 
-    # ---------------------------------------------------------------- 界面
+    # ---------------------------------------------------------------- 界面（仅托盘）
     def build_ui(self) -> None:
-        """创建主窗口与托盘。"""
-        self.window = ServerWindow(self)
+        """创建托盘图标；不创建任何主窗口。"""
         from PyQt6.QtWidgets import QSystemTrayIcon
         self.tray_available = (not self.args.no_tray) and QSystemTrayIcon.isSystemTrayAvailable()
         if self.tray_available:
-            self.tray = Tray(self.window, self.show_window, self._tray_start,
-                             self._tray_stop, self._tray_panel, self.window.quit_app)
+            self.tray = Tray(None, self.open_panel, self._tray_start,
+                             self._tray_stop, self.quit_app,
+                             info_provider=self.tray_info, on_logs=self.open_logs)
             self.tray.set_running(self.http_running and self.ws_running)
-        if self.args.tray or self.config.data.get('trayStart', False):
-            self.window.hide()
-        else:
-            self.window.show()
+        if self.config.data.get('splashServer', True):
+            self.logbus.push('服务器已在后台运行，右键托盘图标可打开管理面板', 'ok')
 
-    def show_window(self) -> None:
-        """显示并激活主窗口。"""
-        if self.window:
-            self.window.showNormal()
-            self.window.raise_()
-            self.window.activateWindow()
+    def open_logs(self) -> None:
+        """在独立窗口中查看运行日志。"""
+        if self.log_window is None:
+            self.log_window = LogWindow(self.logbus, self.data_dir)
+        self.log_window.show()
+        self.log_window.raise_()
+        self.log_window.activateWindow()
+
+    def open_panel(self) -> None:
+        """在外部默认浏览器中打开管理面板网页。"""
+        if not self.http_running:
+            self.logbus.push('请先启动服务器，再打开管理面板', 'warn')
+            if self.tray:
+                self.tray.notify('提示', '服务器尚未启动')
+            return
+        url = QUrl('http://127.0.0.1:%d/panel' % self.config.port)
+        QDesktopServices.openUrl(url)
 
     def _tray_start(self) -> None:
         """托盘菜单：启动服务。"""
         ok, msg = self.start_services()
         self.logbus.push(msg, 'ok' if ok else 'error')
-        if self.window:
-            self.window.refresh_all()
 
     def _tray_stop(self) -> None:
         """托盘菜单：停止服务。"""
         self.stop_services()
         self.logbus.push('服务器已停止', 'warn')
-        if self.window:
-            self.window.refresh_all()
 
-    def _tray_panel(self) -> None:
-        """托盘菜单：打开面板。"""
-        if self.window:
-            if not self.http_running:
-                QMessageBox.information(self.window, '提示', '请先启动服务器，再打开面板。')
-                return
-            self.window._open_panel()
+    def quit_app(self) -> None:
+        """退出服务端。"""
+        self.stop_services()
+        if self.log_window is not None:
+            self.log_window.close()
+            self.log_window = None
+        if self.tray:
+            self.tray.hide()
+        QApplication.quit()
 
 
 def main() -> int:
@@ -240,10 +273,9 @@ def main() -> int:
     args = parse_args(sys.argv[1:])
     app = QApplication(sys.argv[:1])
     app.setApplicationName('Play With Snake Server')
-    app.setStyleSheet(QSS)
+    app.setQuitOnLastWindowClosed(False)   # 无主窗口，关闭最后窗口不应退出
 
-    # 单实例：已有实例时只把它唤到前台
-    # 需要握手确认，否则进程异常退出留下的同名管道会让新实例「静默不启动」
+    # 单实例：已有实例时打开它的面板后直接退出
     from PyQt6.QtNetwork import QLocalServer, QLocalSocket
     key = 'play-with-snake-server'
     probe = QLocalSocket()
@@ -261,38 +293,24 @@ def main() -> int:
     holder.listen(key)
 
     ctx = ServerApp(args)
-    ctx.logbus.push('Play With Snake 服务器控制台 v%s 启动中…' % APP_VERSION)
+    ctx.logbus.push('Play With Snake 服务器 v%s 启动中…' % APP_VERSION)
     ctx.logbus.push('数据目录：%s' % ctx.data_dir)
     ctx.logbus.push('权限：%s' % ('管理员' if ctx.admin else '普通用户（防火墙/开机自启需要管理员）'),
                     'ok' if ctx.admin else 'warn')
 
     def on_new_conn():
-        """再次启动时回写握手结果并把主窗口唤到前台。"""
+        """再次启动时回写握手结果并打开面板。"""
         conn = holder.nextPendingConnection()
         if conn:
             conn.waitForReadyRead(200)
             conn.write(b'OK')
             conn.flush()
             conn.waitForBytesWritten(200)
-            if ctx.window:
-                ctx.show_window()
+            ctx.open_panel()
     holder.newConnection.connect(on_new_conn)
 
     ctx.build_ui()
     ctx.start_services()
-
-    if args.shot:
-        def take_shot():
-            try:
-                ctx.show_window()
-                QTimer.singleShot(900, lambda: (
-                    ctx.window.grab().save(args.shot),
-                    ctx.logbus.push('已保存界面截图：' + args.shot, 'ok'),
-                    ctx.window.quit_app(),
-                ))
-            except Exception as e:
-                ctx.logbus.push('截图失败：%s' % e, 'error')
-        QTimer.singleShot(600, take_shot)
 
     code = app.exec()
     ctx.stop_services()

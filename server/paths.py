@@ -1,4 +1,4 @@
-"""路径解析：源码运行与 PyInstaller 打包运行（onedir）都可用。"""
+"""路径解析：源码运行与 PyInstaller 打包运行（onefile / onedir）都可用。"""
 from __future__ import annotations
 
 import os

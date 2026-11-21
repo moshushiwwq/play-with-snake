@@ -82,7 +82,7 @@ class TestHttpApi(unittest.TestCase):
         self.assertIn('Play With Snake', body)
         with urllib.request.urlopen(self.base + '/panel', timeout=8) as r:
             panel = r.read().decode('utf-8')
-        self.assertIn('访问密码', panel)
+        self.assertIn('管理员账号', panel)
         self.assertIn('排行榜', panel)
 
     def test_rank_signature(self):

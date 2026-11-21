@@ -1074,6 +1074,7 @@ body.theme-dark .joy-pad .c1{color:#475569;}
           <div class="isl-actions">
             <button class="btn btn-primary" id="islConnect" type="button">连接服务器</button>
             <button class="btn btn-ghost" id="islDisconnect" type="button">断开</button>
+            <button class="btn btn-ghost" id="islAdmin" type="button">管理员选项</button>
           </div>
           <div class="isl-note" id="islNote">连接后可在「联机对战」中创建或加入房间；成绩与自制地图会同步到该服务器。</div>
         </div>
@@ -1115,6 +1116,7 @@ body.theme-dark .joy-pad .c1{color:#475569;}
                 <button class="btn btn-primary" id="ovConnect" type="button">连接服务器</button>
                 <button class="btn btn-ghost" id="ovDisconnect" type="button">断开</button>
                 <button class="mini-btn" id="ovRefreshRooms" type="button">刷新房间</button>
+                <button class="mini-btn" id="ovAdmin" type="button">管理员选项</button>
               </div>
               <div class="ov-sub" id="ovStatus">未连接</div>
             </div>
@@ -1993,9 +1995,6 @@ function renderMapManageList(){
 }
 
 function exportOperationLogs(){
-  if (Backend.mode === 'qt'){
-    try { Backend.bridge.exportLogs(); showToast('操作日志已导出', '#0aa96a', 2000); return; } catch (e){}
-  }
   const list = DB.get('snake15_oplogs', []);
   exportMapFile({ name: '操作日志-' + new Date().toISOString().slice(0, 10), walls: [], logs: list });
 }
@@ -2022,10 +2021,7 @@ function bindExtraSettings(){
   if ($('mapNewBtn')) $('mapNewBtn').onclick = function(){ openEditor(); };
   if ($('exportLogsBtn')) $('exportLogsBtn').onclick = exportOperationLogs;
   if ($('openDataDirBtn')) $('openDataDirBtn').onclick = function(){
-    if (Backend.mode === 'qt'){
-      try { Backend.bridge.openDataDir(); return; } catch (e){}
-    }
-    showToast('浏览器模式下数据保存在本地存储中，无独立目录', '#8a99b8', 2400);
+    showToast('数据保存在浏览器本地存储中，无独立目录', '#8a99b8', 2400);
   };
   renderMapManageList();
   Backend.syncMapsFromQt(renderMapManageList);
@@ -4378,9 +4374,8 @@ function openMapPreview(m){
 
 /* ============================================================
    联机对战（服务器权威）
-   - 桌面客户端：由 Python 后端持有 QWebSocket，经 QWebChannel 与页面交互
-   - 局域网浏览器：页面由服务器托管，直接连 ws://IP:8081
-   两种模式共用同一套消息处理与界面，通过 Backend 抽象分流。
+   页面在浏览器中直接通过 WebSocket 连 ws://IP:8081、fetch 调 HTTP 接口，
+   同一套消息处理与界面由 Backend 抽象封装。
    ============================================================ */
 let onlineRole = null;        /* null | host | guest | spectator */
 let onlineRoom = '';
@@ -4439,6 +4434,28 @@ function defaultServerHost(){
   if (location.protocol === 'http:' && location.hostname) return location.hostname;
   return '127.0.0.1';
 }
+/* 当前页面是否由本机回环页面服务托管（此时可用本地代理做 UDP 发现）。
+   客户端打开的地址会带 ?client=1；端口回退用于手动输入 127.0.0.1:17001 的场景。 */
+function isLocalOrigin(){
+  if (/(?:^|[?&])client=1(?:&|$)/.test(location.search || '')) return true;
+  const p = Number(location.port || 0);
+  return (location.hostname === '127.0.0.1' || location.hostname === 'localhost'
+          || location.hostname === '') && p >= 17001 && p <= 17041;
+}
+/* 拼接当前所连服务器的管理面板网页地址 */
+function adminPanelUrl(){
+  const h = parseHost(netServerHost || defaultServerHost()) || { host: '127.0.0.1', httpPort: 8080 };
+  const httpPort = Backend.httpPort || h.httpPort || 8080;
+  return 'http://' + h.host + ':' + httpPort + '/panel';
+}
+/* 管理员选项：在外部浏览器新标签打开服务端管理面板 */
+function openAdminPanel(){
+  const url = adminPanelUrl();
+  if (!netConnected){
+    showToast('尚未连接服务器，正在打开 ' + url, '#0b8fd4', 2200);
+  }
+  window.open(url, '_blank');
+}
 function httpBaseFor(host){
   const h = parseHost(host || netServerHost || defaultServerHost()) || { host: '127.0.0.1', httpPort: 8080 };
   return 'http://' + h.host + ':' + (Backend.httpPort || h.httpPort);
@@ -4448,67 +4465,19 @@ function wsUrlFor(host){
   return 'ws://' + h.host + ':' + h.wsPort;
 }
 
-/* ---------------- Backend：Qt 桥 / 浏览器直连 ---------------- */
+/* ---------------- Backend：浏览器直连（WebSocket + fetch） ---------------- */
 const Backend = {
-  mode: 'browser', bridge: null, ws: null, onMessage: null, onState: null, _ready: null, httpPort: 8080,
+  ws: null, onMessage: null, onState: null, onServers: null, httpPort: 8080,
   setHttpPort(p){
     p = Number(p);
     if (!(p > 0 && p < 65536)) return;
     Backend.httpPort = p;
-    if (Backend.mode === 'qt' && Backend.bridge){ try { Backend.bridge.setHttpPort(p); } catch (e){} }
   },
-  init(){
-    if (Backend._ready) return Backend._ready;
-    Backend._ready = new Promise(function(resolve){
-      const hasQt = !!(window.qt && window.qt.webChannelTransport);
-      if (!hasQt){ Backend.mode = 'browser'; resolve(); return; }
-      const s = document.createElement('script');
-      s.src = 'qrc:///qtwebchannel/qwebchannel.js';
-      s.onload = function(){
-        if (!window.QWebChannel){ Backend.mode = 'browser'; resolve(); return; }
-        try {
-          new QWebChannel(qt.webChannelTransport, function(ch){
-            Backend.bridge = ch.objects.snake;
-            Backend.mode = 'qt';
-            if (Backend.bridge.connectionState){
-              Backend.bridge.connectionState.connect(function(st, host){
-                if (Backend.onState) Backend.onState(st, host);
-              });
-            }
-            if (Backend.bridge.serverMessage){
-              Backend.bridge.serverMessage.connect(function(txt){
-                if (Backend.onMessage) Backend.onMessage(txt);
-              });
-            }
-            if (Backend.bridge.serversChanged){
-              Backend.bridge.serversChanged.connect(function(txt){
-                if (Backend.onServers) Backend.onServers(txt);
-              });
-            }
-            resolve();
-          });
-        } catch (e){ Backend.mode = 'browser'; resolve(); }
-      };
-      s.onerror = function(){ Backend.mode = 'browser'; resolve(); };
-      document.head.appendChild(s);
-    });
-    return Backend._ready;
-  },
+  init(){ return Promise.resolve(); },
   /* 询问服务器真实的 HTTP / WS 端口（避免手填端口与服务器配置不一致） */
   resolveServer(host, cb){
     Backend.init().then(function(){
       const parsed = parseHost(host) || { host: '127.0.0.1', port: 0 };
-      if (Backend.mode === 'qt'){
-        try {
-          Backend.bridge.resolveServer(parsed.host + (parsed.port ? ':' + parsed.port : ''), function(txt){
-            let r = null;
-            try { r = JSON.parse(txt); } catch (e){}
-            if (r && r.httpPort) Backend.setHttpPort(r.httpPort);
-            cb && cb(r || { ok: false, host: parsed.host, wsPort: parsed.wsPort });
-          });
-          return;
-        } catch (e){}
-      }
       const ports = [];
       if (parsed.port) ports.push(parsed.port);
       [8080, 8081].forEach(function(p){ if (ports.indexOf(p) < 0) ports.push(p); });
@@ -4531,30 +4500,48 @@ const Backend = {
       })(0);
     });
   },
-  /* 局域网服务器自动发现（Qt 端由 Python 用 UDP 广播探测） */
+  /* 局域网服务器自动发现：本地回环托管时由 Python 代理 UDP 扫描；
+     页面由服务端直接托管时改用同源 /api/discover 获取端口并自动连接。 */
   startDiscovery(){
     Backend.init().then(function(){
-      if (Backend.mode === 'qt'){ try { Backend.bridge.startDiscovery(); } catch (e){} }
-    });
-  },
-  stopDiscovery(){
-    Backend.init().then(function(){
-      if (Backend.mode === 'qt'){ try { Backend.bridge.stopDiscovery(); } catch (e){} }
-    });
-  },
-  connect(host, cb){
-    Backend.init().then(function(){
-      if (Backend.mode === 'qt'){
-        const fail = { ok: false, msg: '桥接不可用' };
-        try {
-          Backend.bridge.connectServer(host, function(txt){
-            let r = fail;
-            try { r = JSON.parse(txt); } catch (e){}
-            cb && cb(r);
-          });
-        } catch (e){ cb && cb(fail); }
+      if (!isLocalOrigin()){
+        /* 页面由服务端直接托管时（局域网玩家打开 http://服务器IP:8080/），
+           浏览器无法发送 UDP，但同源 /api/discover 可以直接拿到真实端口。 */
+        fetch('/api/discover', { cache: 'no-store' })
+          .then(function(r){ return r.json(); })
+          .then(function(j){
+            if (!j || !j.ok) return;
+            const list = [{
+              host: location.hostname || '127.0.0.1',
+              httpPort: Number(j.port) || Number(location.port) || 8080,
+              wsPort: Number(j.wsPort) || 8081,
+              name: j.name || '贪吃蛇大冒险服务器',
+              version: j.version || '',
+              rooms: Number(j.rooms) || 0,
+              players: Number(j.players) || 0,
+              online: Number(j.online) || 0,
+              source: 'self'
+            }];
+            if (Backend.onServers) Backend.onServers(JSON.stringify(list));
+          })
+          .catch(function(){});
         return;
       }
+      /* 把上次连接的地址作为提示传给本地代理：即使 UDP 广播被防火墙拦截，
+         也能通过 HTTP 直接探测到已知服务器。 */
+      const hint = encodeURIComponent(SETTINGS.serverHost || '');
+      fetch('/discover' + (hint ? ('?host=' + hint) : ''), { cache: 'no-store' })
+        .then(function(r){ return r.json(); })
+        .then(function(j){
+          const list = (j && Array.isArray(j.servers)) ? j.servers : [];
+          if (Backend.onServers) Backend.onServers(JSON.stringify(list));
+        })
+        .catch(function(){});
+    });
+  },
+  stopDiscovery(){ /* 浏览器模式无后台扫描线程，空操作 */ },
+  connect(host, cb){
+    Backend.init().then(function(){
       try {
         if (Backend.ws) { try { Backend.ws.close(); } catch (e){} }
         const ws = new WebSocket(wsUrlFor(host));
@@ -4568,34 +4555,16 @@ const Backend = {
     });
   },
   disconnect(){
-    if (Backend.mode === 'qt'){
-      try { Backend.bridge.disconnectServer(); } catch (e){}
-      return;
-    }
     try { if (Backend.ws) Backend.ws.close(); } catch (e){}
     Backend.ws = null;
   },
   send(obj){
     const text = JSON.stringify(obj);
-    if (Backend.mode === 'qt'){
-      try { Backend.bridge.sendMessage(text); } catch (e){}
-      return;
-    }
     try { if (Backend.ws && Backend.ws.readyState === 1) Backend.ws.send(text); } catch (e){}
   },
   httpGet(path, host, cb){
     const url = httpBaseFor(host) + path;
     Backend.init().then(function(){
-      if (Backend.mode === 'qt'){
-        try {
-          Backend.bridge.httpGet(path, function(txt){
-            let j = null;
-            try { j = JSON.parse(txt); } catch (e){}
-            cb && cb(j);
-          });
-        } catch (e){ cb && cb(null); }
-        return;
-      }
       fetch(url, { cache: 'no-store' }).then(function(r){ return r.json(); })
         .then(function(j){ cb && cb(j); }).catch(function(){ cb && cb(null); });
     });
@@ -4603,16 +4572,6 @@ const Backend = {
   httpPost(path, obj, host, cb){
     const url = httpBaseFor(host) + path;
     Backend.init().then(function(){
-      if (Backend.mode === 'qt'){
-        try {
-          Backend.bridge.httpPost(path, JSON.stringify(obj), function(txt){
-            let j = null;
-            try { j = JSON.parse(txt); } catch (e){}
-            cb && cb(j);
-          });
-        } catch (e){ cb && cb(null); }
-        return;
-      }
       fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(obj) })
         .then(function(r){ return r.json(); })
         .then(function(j){ cb && cb(j); }).catch(function(){ cb && cb(null); });
@@ -4620,55 +4579,20 @@ const Backend = {
   },
   uploadMap(map, cb){
     Backend.init().then(function(){
-      if (Backend.mode === 'qt'){
-        try {
-          Backend.bridge.uploadMap(JSON.stringify(map), function(txt){
-            let j = null;
-            try { j = JSON.parse(txt); } catch (e){}
-            cb && cb(j);
-          });
-        } catch (e){ cb && cb(null); }
-        return;
-      }
       Backend.httpPost('/api/map', map, netServerHost, cb);
     });
   },
   saveLog(kind, detail){
     const entry = { kind: kind, detail: detail, ts: Date.now() };
-    if (Backend.mode === 'qt'){
-      try { Backend.bridge.saveLog(JSON.stringify(entry)); } catch (e){}
-      return;
-    }
     try {
       const list = DB.get('snake15_oplogs', []);
       list.unshift(entry);
       DB.set('snake15_oplogs', list.slice(0, 500));
     } catch (e){}
   },
-  saveMaps(list){
-    if (Backend.mode === 'qt'){
-      try { Backend.bridge.saveMaps(JSON.stringify(list)); } catch (e){}
-    }
-  },
-  syncMapsFromQt(cb){
-    Backend.init().then(function(){
-      if (Backend.mode !== 'qt'){ cb && cb(); return; }
-      try {
-        Backend.bridge.listMaps(function(txt){
-          let list = null;
-          try { list = JSON.parse(txt); } catch (e){}
-          if (Array.isArray(list)){
-            const local = DB.get(K_MAPS, []);
-            const ids = {};
-            list.forEach(function(m){ ids[m.id] = 1; });
-            local.forEach(function(m){ if (!ids[m.id]) list.push(m); });
-            DB.set(K_MAPS, list);
-          }
-          cb && cb();
-        });
-      } catch (e){ cb && cb(); }
-    });
-  }
+  saveMaps(/* list */){ /* 浏览器模式地图保存在本地存储，由调用方 DB.set 处理 */ },
+  /* 兼容旧调用名：浏览器模式无需从桥接层同步地图，直接回调。 */
+  syncMapsFromQt(cb){ cb && cb(); }
 };
 
 /* ---------------- 灵动岛与状态 ---------------- */
@@ -4697,6 +4621,11 @@ function updateIsland(){
 function onBackendState(state, host){
   if (state === 'connected'){
     netConnected = true;
+    everConnected = true;
+    manualOffline = false;
+    autoConnectTried = true;
+    autoScanCount = 0;
+    if (autoScanTimer){ clearTimeout(autoScanTimer); autoScanTimer = null; }
     netServerHost = host;
     SETTINGS.serverHost = host;
     saveSettings();
@@ -4722,6 +4651,11 @@ function onBackendState(state, host){
     if (state === 'error') showToast('连接失败，请检查服务器地址与端口', '#d64545', 2600);
     else showToast('已断开与服务器的连接', '#8a99b8', 2000);
     Backend.saveLog('disconnect', host || '');
+    /* 首次连接失败时自动重试，避免服务器晚于客户端启动导致一直连不上 */
+    if (!manualOffline && !everConnected){
+      autoConnectTried = false;
+      scheduleAutoScan(2600);
+    }
   }
   if (state === 'connected') Backend.saveLog('connect', host);
 }
@@ -4741,6 +4675,28 @@ function currentName(){
 let discoveredServers = [];
 let scanStopTimer = null;
 let autoConnectTried = false;
+let autoScanTimer = null;
+let autoScanCount = 0;
+let everConnected = false;
+let manualOffline = false;
+const AUTO_SCAN_MAX = 12;
+
+/* 清理旧版本可能注册的 Service Worker 与缓存：127.0.0.1 端口固定，
+   旧 Service Worker 可能把过期的页面缓存返回给浏览器。 */
+function cleanupLegacyWorkers(){
+  try {
+    if ('serviceWorker' in navigator){
+      navigator.serviceWorker.getRegistrations().then(function(list){
+        (list || []).forEach(function(reg){ try { reg.unregister(); } catch (e){} });
+      }).catch(function(){});
+    }
+    if (window.caches && caches.keys){
+      caches.keys().then(function(keys){
+        (keys || []).forEach(function(k){ try { caches.delete(k); } catch (e){} });
+      }).catch(function(){});
+    }
+  } catch (e){}
+}
 
 /* 转义 HTML，避免服务器名里的特殊字符破坏结构 */
 function escHtmlText(s){
@@ -4770,10 +4726,11 @@ function renderDiscovered(){
   });
 }
 
-/* 开始一次局域网扫描 */
-function startScan(){
+/* 开始一次局域网扫描（auto=true 表示启动后的自动重试） */
+function startScan(auto){
+  if (autoScanTimer){ clearTimeout(autoScanTimer); autoScanTimer = null; }
   const hint = $('islScanHint');
-  if (hint) hint.textContent = '正在搜索局域网服务器…';
+  if (hint) hint.textContent = auto ? '正在自动搜索服务器…' : '正在搜索局域网服务器…';
   renderDiscovered();
   Backend.startDiscovery();
   if (scanStopTimer) clearTimeout(scanStopTimer);
@@ -4783,6 +4740,17 @@ function startScan(){
       ? ('已发现 ' + discoveredServers.length + ' 台服务器')
       : '未发现服务器，可手动填写地址';
   }, 3200);
+}
+
+/* 安排一次自动重试：服务器可能比客户端晚启动，UDP 也可能被防火墙拦截 */
+function scheduleAutoScan(delay){
+  if (netConnected || autoScanTimer || autoScanCount >= AUTO_SCAN_MAX) return;
+  autoScanTimer = setTimeout(function(){
+    autoScanTimer = null;
+    if (netConnected) return;
+    autoScanCount++;
+    startScan(true);
+  }, delay || 3000);
 }
 
 /* 扫描结果回调 */
@@ -4795,16 +4763,22 @@ function onServersFound(txt){
   if (hint){
     hint.textContent = discoveredServers.length
       ? ('已发现 ' + discoveredServers.length + ' 台服务器')
-      : '未发现服务器，可手动填写地址';
+      : '未发现服务器，正在自动重试…';
   }
-  autoConnectFromDiscovery();
+  if (discoveredServers.length){
+    autoConnectFromDiscovery();
+  } else if (!netConnected){
+    scheduleAutoScan(3200);
+  }
 }
 
 /* 启动后自动连接发现到的服务器（优先上次连接过的那台） */
 function autoConnectFromDiscovery(){
   if (autoConnectTried || netConnected || !discoveredServers.length) return;
   if (SETTINGS.autoConnect === false) return;
+  if (autoScanTimer){ clearTimeout(autoScanTimer); autoScanTimer = null; }
   autoConnectTried = true;
+  manualOffline = false;
   const lastHost = String(SETTINGS.serverHost || '').split(':')[0];
   let target = null;
   if (lastHost){
@@ -4818,6 +4792,8 @@ function autoConnectFromDiscovery(){
 /* 连接到某个已发现的服务器（端口来自发现结果，无需用户填写） */
 function connectServerAt(s){
   if (!s) return;
+  manualOffline = false;
+  autoConnectTried = true;
   Backend.setHttpPort(s.httpPort);
   if ($('islHostInput')) $('islHostInput').value = s.host;
   if ($('ovHost')) $('ovHost').value = s.host;
@@ -4831,11 +4807,14 @@ function doConnect(){
   const raw = ($('islHostInput') && $('islHostInput').value.trim()) || ($('ovHost') && $('ovHost').value.trim()) || defaultServerHost();
   const parsed = parseHost(raw);
   if (!parsed){ showToast('请填写正确的服务器地址', '#d64545', 2000); return; }
-  if ($('islHostInput')) $('islHostInput').value = parsed.host;
-  if ($('ovHost')) $('ovHost').value = parsed.host;
+  manualOffline = false;
+  autoConnectTried = true;
+  const hostText = parsed.port ? (parsed.host + ':' + parsed.port) : parsed.host;
+  if ($('islHostInput')) $('islHostInput').value = hostText;
+  if ($('ovHost')) $('ovHost').value = hostText;
   const box = $('island'); if (box) { box.classList.remove('open'); box.classList.add('connecting'); }
   const t = $('islTxt'); if (t) t.textContent = '正在识别服务器端口…';
-  Backend.resolveServer(parsed.host + (parsed.port ? ':' + parsed.port : ''), function(res){
+  Backend.resolveServer(hostText, function(res){
     let httpPort = res && res.httpPort;
     let wsPort = res && res.wsPort;
     /* 探测失败时，用自动发现得到的结果兜底（例如用户只填了 IP） */
@@ -4851,6 +4830,9 @@ function doConnect(){
   });
 }
 function doDisconnect(){
+  manualOffline = true;
+  autoConnectTried = true;
+  if (autoScanTimer){ clearTimeout(autoScanTimer); autoScanTimer = null; }
   Backend.disconnect();
   onBackendState('disconnected', netServerHost);
 }
@@ -5330,8 +5312,10 @@ function bindOnline(){
   };
   if ($('islConnect')) $('islConnect').onclick = doConnect;
   if ($('islDisconnect')) $('islDisconnect').onclick = doDisconnect;
+  if ($('islAdmin')) $('islAdmin').onclick = openAdminPanel;
   if ($('ovConnect')) $('ovConnect').onclick = doConnect;
   if ($('ovDisconnect')) $('ovDisconnect').onclick = doDisconnect;
+  if ($('ovAdmin')) $('ovAdmin').onclick = openAdminPanel;
   if ($('ovRefreshRooms')) $('ovRefreshRooms').onclick = function(){ onlineSend({ t: 'lobby' }); };
   if ($('ovTopRefresh')) $('ovTopRefresh').onclick = function(){ fetchOnlineTop(true); };
   if ($('ovCreate')) $('ovCreate').onclick = function(){
@@ -6529,6 +6513,7 @@ function loop(now){
    启动
    ============================================================ */
 function init(){
+  cleanupLegacyWorkers();
   cv = $('cv');
   ctx = cv.getContext('2d');
   overlayEl = $('overlay');

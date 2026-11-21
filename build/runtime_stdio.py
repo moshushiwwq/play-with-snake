@@ -1,9 +1,8 @@
 """PyInstaller 运行时钩子：为 windowed 产物提供可用的标准流与崩溃日志。
 
 windowed（console=False）打包时进程没有控制台，标准输出的文件描述符 0/1/2
-不存在：PyInstaller 会把 sys.stdout / sys.stderr 置为 None，而 Qt / QtWebEngine
-（Chromium）仍在 C 层向 stderr 写入，写入失败会直接影响浏览器初始化，表现为
-窗口空白、页面不加载。本钩子在 Python 启动最早期同时修复 C 层 fd 与 sys 层对象，
+不存在：PyInstaller 会把 sys.stdout / sys.stderr 置为 None，而 Qt 仍可能在 C 层
+向 stderr 写入。本钩子在 Python 启动最早期同时修复 C 层 fd 与 sys 层对象，
 并把未捕获异常写入程序目录下的 app.log。
 """
 from __future__ import annotations

@@ -8,7 +8,7 @@
 | WebSocket | 8081 | 权威对局协议（QWebSocketServer） |
 | UDP | 41999 | 内网自动发现广播 |
 
-浏览器玩家直接访问 `http://<服务器IP>:8080/` 即可；桌面客户端通过 Python 持有与 8081 的连接。
+浏览器玩家直接访问 `http://<服务器IP>:8080/` 即可；客户端外壳在本机回环托管页面并拉起外部浏览器，页面以浏览器原生 WebSocket + fetch 直连 8081 / 8080。
 
 ## HTTP 接口
 
@@ -16,7 +16,7 @@
 |---|---|---|
 | `/`、`/index.html` | GET | 返回客户端页面（局域网浏览器即用即玩） |
 | `/version.js` | GET | 页面版本信息（构建时生成） |
-| `/panel` | GET | 服务器面板（仅访问密码与排行榜） |
+| `/panel` | GET | 服务器管理面板（账号鉴权、自启动/动画设置、排行榜） |
 | `/health` | GET | `{ok, v, wsPort}` |
 | `/api/discover` | GET | 内网发现响应：`{ok, app:'snake-lan-server', name, version, port, wsPort, rooms, players, online, host}` |
 | `/api/maps` | GET | `{ok, maps:[{id,name,cols,rows,custom}]}` |
@@ -25,10 +25,12 @@
 | `/api/online-board` | GET | 联机排行榜前 30 条，每条附 `ip` 与 `note` |
 | `/api/rank` | POST | 提交联机成绩（需签名，异常数据返回 400） |
 | `/api/solo-score` | POST | 提交单机成绩 `{name,score,length}` |
-| `/api/auth/status` | GET | `{ok, enabled, authed}` |
-| `/api/auth/login` | POST | `{password}`，成功下发 `snake_panel` Cookie |
-| `/api/auth/set` | POST | `{oldPassword,newPassword}`（空字符串表示清除） |
+| `/api/auth/status` | GET | `{ok, enabled, authed, user}` |
+| `/api/auth/login` | POST | `{username,password}`，成功下发 `snake_panel` Cookie |
+| `/api/auth/set` | POST | `{oldPassword,username,newPassword}`（空密码表示清除保护） |
 | `/api/auth/logout` | POST | 清除会话 |
+| `/api/server/settings` | GET | 需登录；返回 `{ok, settings:{port,wsPort,autostart,autostartMode,discovery,splashServer,splashClient,admin,version}}` |
+| `/api/server/settings` | POST | 需登录；body `{autostart:'none'|'logon'|'boot', discovery, splashServer, splashClient}` |
 | `/api/leaderboard` | GET | 玩家统计前 30（需登录） |
 
 所有 `/api/*` 均带 `Access-Control-Allow-Origin: *` 与 `OPTIONS 204`。
