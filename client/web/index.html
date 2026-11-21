@@ -372,7 +372,9 @@ body.theme-dark .map-opt .mo-name{color:#e2e8f0;}
   .editor-side > .card{flex:0 0 auto;}
 }
 /* HUD */
-#hud{display:flex;gap:7px;align-items:stretch;flex-shrink:0;padding:10px 12px 0;min-height:52px;}
+#hud{display:flex;flex-direction:column;gap:7px;flex-shrink:0;padding:10px 12px 0;min-height:52px;}
+.hud-row{display:flex;gap:7px;align-items:stretch;}
+.stat-spacer{flex:1 1 0;}
 .stat{
   flex:1;position:relative;min-width:0;
   background:#fff;border:1px solid rgba(30,50,90,.10);border-radius:12px;
@@ -428,6 +430,7 @@ canvas{
 
 #countdown{
   position:absolute;inset:0;display:none;
+  flex-direction:column;gap:8px;
   align-items:center;justify-content:center;
   pointer-events:none;z-index:30;
 }
@@ -442,6 +445,22 @@ canvas{
   0%{transform:scale(.3);opacity:0;}
   50%{transform:scale(1.15);opacity:1;}
   100%{transform:scale(1);opacity:1;}
+}
+#countdown .cd-tip{
+  max-width:88%;
+  font-size:14px;font-weight:800;letter-spacing:.5px;line-height:1.5;
+  color:#4a5b78;background:rgba(255,255,255,.88);
+  border:1px solid rgba(30,50,90,.12);border-radius:999px;
+  padding:6px 16px;text-align:center;
+  box-shadow:0 4px 14px rgba(30,50,90,.10);
+  animation:cdTipIn .3s ease-out;
+}
+@keyframes cdTipIn{
+  0%{transform:translateY(6px);opacity:0;}
+  100%{transform:translateY(0);opacity:1;}
+}
+@media (prefers-reduced-motion: reduce){
+  #countdown .cd-num,#countdown .cd-tip{animation:none;}
 }
 
 #buffs{
@@ -2249,17 +2268,24 @@ function showToast(text, color, duration){
 /* ============================================================
    倒计时
    ============================================================ */
-function setCountdownDisplay(text){
+function setCountdownDisplay(text, tip){
   const el = $('countdown');
   if (!el) return;
   el.classList.add('show');
-  el.innerHTML = '<span class="cd-num">' + text + '</span>';
+  const t = tip || '';
+  if (el._cdText === text && el._cdTip === t) return;
+  el._cdText = text;
+  el._cdTip = t;
+  el.innerHTML = '<span class="cd-num">' + text + '</span>' +
+    (t ? '<span class="cd-tip">' + esc(t) + '</span>' : '');
 }
 function hideCountdown(){
   const el = $('countdown');
   if (!el) return;
   el.classList.remove('show');
   el.innerHTML = '';
+  el._cdText = '';
+  el._cdTip = '';
 }
 
 /* ============================================================
@@ -2841,6 +2867,7 @@ function startGame(){
   G.phase = 'countdown';
   G.countdownTimer = 0;
   G.countdownVal = 4;
+  G.cdTip = '';
   setCountdownDisplay('3');
 
   showScreen('screen-game');
@@ -4977,7 +5004,21 @@ function onNetStartMsg(m){
   resize();
   updateHUD();
   renderBuffs();
-  showToast('对战开始', '#0aa96a', 2000);
+  /* 开局提示：非房主明确告知「房主 X 开始了对战」，配合 3-2-1 倒计时 */
+  const by = String(m.by || '').trim();
+  let tip;
+  if (by === '全员准备' || by === '全员再来一局' || by === '上一局'){
+    tip = '全员准备完毕，对战开始';
+  } else if (onlineRole === 'host'){
+    tip = '你开始了对战';
+  } else {
+    tip = by ? ('房主 ' + by + ' 开始了对战') : '房主开始了对战';
+  }
+  if (onlineRole === 'spectator') tip += '（观战）';
+  G.cdTip = tip;
+  G.countdownVal = 3;
+  setCountdownDisplay('3', tip);
+  sfx(560, 0.14, 'sine', 0.07, 900);
   Backend.saveLog('online-start', (m.map || '') + ' / ' + (m.diff || ''));
 }
 
@@ -4986,15 +5027,21 @@ function onNetOverMsg(m){
   G.phase = 'over';
   G.shake = 14;
   onlineEndShown = true;
+  hideCountdown();
+  G.cdTip = '';
   const result = Array.isArray(m.result) ? m.result : [];
   const totals = Array.isArray(m.totals) ? m.totals : [];
-  const winner = result.filter(function(r){ return r.win; })[0] || result[0];
+  const winner = result.filter(function(r){ return r.win; })[0] || null;
+  const isDraw = !winner && (!!m.draw || result.length > 0);
   const line = (totals.length ? totals : result).map(function(r){
     return esc(r.name || '玩家') + ' <b>' + (r.score || 0) + '</b>';
   }).join(' &nbsp;·&nbsp; ');
   showOverlay(
-    '<div class="big" style="color:#0aa96a">' + (winner ? (esc(winner.name) + ' 获胜') : '对局结束') + '</div>' +
-    '<p>本局共 ' + (result.length || totals.length) + ' 名玩家参与</p>' +
+    (isDraw
+      ? '<div class="big" style="color:#d99b00">平局</div>' +
+        '<p>' + (result.length > 2 ? '所有玩家同时阵亡' : '双方同时阵亡') + '</p>'
+      : '<div class="big" style="color:#0aa96a">' + (winner ? (esc(winner.name) + ' 获胜') : '对局结束') + '</div>' +
+        '<p>本局共 ' + (result.length || totals.length) + ' 名玩家参与</p>') +
     '<div class="scoreline">' + line + '</div>',
     [
       { text: '再来一局', cls: 'btn-primary', fn: function(){
@@ -5081,13 +5128,21 @@ function applyOnlineState(s){
   for (let i = 0; i < n; i++) G.queues.push([]);
 
   if (s.phase === 'countdown'){
-    const cd = (s.cd === undefined || s.cd === null) ? 3 : s.cd;
-    if (cd !== G.countdownVal){ G.countdownVal = cd; setCountdownDisplay(String(Math.max(1, cd))); }
+    const cd = (s.cd === undefined || s.cd === null) ? 3 : Math.max(1, s.cd | 0);
+    if (cd !== G.countdownVal){
+      G.countdownVal = cd;
+      setCountdownDisplay(String(cd), G.cdTip);
+      sfx(560 + (3 - Math.min(3, cd)) * 130, 0.14, 'sine', 0.07, 900);
+    }
     G.phase = 'countdown';
   } else {
     G.phase = (s.phase === 'over') ? 'over' : 'playing';
   }
-  if (oldPhase === 'countdown' && G.phase !== 'countdown') hideCountdown();
+  if (oldPhase === 'countdown' && G.phase !== 'countdown'){
+    hideCountdown();
+    G.cdTip = '';
+    if (G.phase === 'playing') sfx(1400, 0.2, 'triangle', 0.09, 1900);
+  }
   updateHUD();
   renderBuffs();
 }
@@ -5955,7 +6010,7 @@ function updateHUD(){
       } else c.classList.remove('show');
     }
   } else {
-    /* 多人：逐位刷新名字与分数（2-4 人） */
+    /* 多人：逐位刷新名字与分数（2-4 人）；联机等级显示「我」的等级 */
     const n = Math.min((G.players || []).length, 4);
     let lv = 1;
     for (let i = 0; i < n; i++){
@@ -5964,7 +6019,7 @@ function updateHUD(){
       if (nm) nm.textContent = G.players[i] || ('P' + (i + 1));
       lv = Math.max(lv, G.levels[i] || 1);
     }
-    set('hLevel', lv);
+    set('hLevel', G.online ? (G.levels[hudMyIndex(n)] || 1) : lv);
   }
 }
 
@@ -6274,29 +6329,49 @@ function render(){
 function buildHUD(){
   buffsEl.style.height = '';
   if (G.mode === 'single'){
-    hudEl.innerHTML =
+    hudEl.innerHTML = '<div class="hud-row">' +
       '<div class="stat"><span class="label">分数</span><span class="val" id="hScore">0</span><div id="combo">x1</div></div>' +
       '<div class="stat"><span class="label">最高</span><span class="val" id="hBest">0</span></div>' +
       '<div class="stat"><span class="label">等级</span><span class="val" id="hLevel">1</span></div>' +
       '<div class="stat"><span class="label">长度</span><span class="val" id="hLen">3</span></div>' +
       '<button class="snd" id="pauseBtn">' + (G.phase==='paused' ? '继续' : '暂停') + '</button>' +
-      '<button class="snd" id="soundBtn">' + (muted ? '静音' : '音效') + '</button>';
+      '<button class="snd" id="soundBtn">' + (muted ? '静音' : '音效') + '</button>' +
+    '</div>';
   } else {
-    /* 双人/多人（含联机 2-4 人）：按实际玩家数为每位玩家生成一块分数面板 */
+    /* 双人/多人（含联机 2-4 人）：第一排固定「我 / 对手 / 等级 / 暂停 / 音效」，
+       与双人对战同一套面板；3-4 人时其余玩家排到第二排，面板宽度与第一排一致 */
     const n = Math.max(2, (G.players || []).length || 2);
-    let html = '';
-    for (let i = 0; i < n; i++){
-      html += '<div class="stat p' + (i === 0 ? 1 : 2) + '">' +
+    const me = hudMyIndex(n);
+    const order = [me];
+    for (let i = 0; i < n; i++) if (i !== me) order.push(i);
+    const panel = function(i){
+      return '<div class="stat p' + (i === me ? 1 : 2) + '">' +
         '<span class="label" id="hN' + i + '">P' + (i + 1) + '</span>' +
         '<span class="val" id="hScore' + i + '">0</span></div>';
-    }
-    html += '<div class="stat"><span class="label">等级</span><span class="val" id="hLevel">1</span></div>' +
+    };
+    const rightCells =
+      '<div class="stat"><span class="label">等级</span><span class="val" id="hLevel">1</span></div>' +
       '<button class="snd" id="pauseBtn">' + (G.phase==='paused' ? '继续' : '暂停') + '</button>' +
       '<button class="snd" id="soundBtn">' + (muted ? '静音' : '音效') + '</button>';
+    let html = '<div class="hud-row">' + panel(order[0]) + panel(order[1]) + rightCells + '</div>';
+    const rest = order.slice(2);
+    if (rest.length){
+      const spacer = 3 - rest.length;
+      html += '<div class="hud-row">' + rest.map(panel).join('') +
+        (spacer > 0 ? '<div class="stat-spacer" style="flex:' + spacer + ' 1 0"></div>' : '') +
+      '</div>';
+    }
     hudEl.innerHTML = html;
   }
   bindSound();
   bindPauseBtn();
+}
+
+/* 当前本地玩家在 HUD 中的下标（联机按昵称匹配，本地双人固定 P1） */
+function hudMyIndex(n){
+  if (!G.online) return 0;
+  const i = (G.players || []).indexOf(onlineMyName);
+  return (i >= 0 && i < n) ? i : 0;
 }
 
 function bindPauseBtn(){

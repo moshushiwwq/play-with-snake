@@ -1,6 +1,7 @@
 """房间内的权威对局引擎（由原 Node 版 Game 类逐条移植）。
 
-所有判定都在服务端进行：移动、吃食、道具、护盾、穿墙、碰撞、复活与结算；
+所有判定都在服务端进行：移动、吃食、道具、护盾、穿墙、碰撞与结算；
+规则与双人对战同源：一人一命、撞到即淘汰、不复活，最后存活者获胜；
 客户端只负责渲染服务端下发的 snapshot。字段名与旧版保持完全一致，
 以保证既有客户端与服务端协议零变更。
 """
@@ -10,7 +11,7 @@ import math
 import random
 import time
 
-from shared.constants import DIFFS, DIRS
+from shared.constants import DIFFS
 
 
 class Game:
@@ -24,7 +25,7 @@ class Game:
         foods: 食物列表 [{x,y,k}]，k=1 普通、k=2 金星。
         powers: 道具列表 [{x,y,k,life}]，k 为 speed/slow/shield/ghost。
         effects: 按 pid 的效果字典 {pid: {speed,slow,ghost,shield,portal}}。
-        events: 待发送的瞬时事件（eat/die/power/shield/respawn）。
+        events: 待发送的瞬时事件（eat/die/power/shield）。
     """
 
     def __init__(self, room, map_def: dict):
@@ -41,6 +42,8 @@ class Game:
         self.rows = int(map_def['rows'])
         self.obstacles = [{'x': int(o['x']), 'y': int(o['y'])} for o in map_def['obstacles']]
         self.phase = 'countdown'
+        # 倒计时按毫秒推进（与难度速度解耦），保证任何难度下都实打实等 3 秒
+        self.countdown_ms = 3000.0
         self.countdown = 3
         self.tick = 0
         self.round = room.round
@@ -56,36 +59,67 @@ class Game:
 
     # ------------------------------------------------------------------ 生成
     def spawn(self) -> None:
-        """在地图中央环状分布所有玩家的初始蛇（4 节、方向朝外）。"""
+        """按双人对战的抬位生成初始蛇（同一横向赛道两端相向，留足反应空间）。
+
+        2 人：两人同处地图中线上、左右相向（与双人对战完全一致）。
+        3-4 人：分成上下两条赛道，每条最多两人相向，避免开局即撞墙或秒撞。
+        """
         cols, rows = self.cols, self.rows
         n = len(self.room.players)
         cx, cy = cols // 2, rows // 2
-        radius = max(6, int(min(cols, rows) / 3))
+        offset = max(3, cols // 6)
+        lane_gap = max(5, rows // 4)
+        lanes = [cy] if n <= 2 else [cy - lane_gap, cy + lane_gap]
         self.snakes = []
         for i, p in enumerate(self.room.players):
-            ang = (math.pi * 2 * i) / max(1, n) - math.pi / 2
-            hx = int(round(cx + math.cos(ang) * radius))
-            hy = int(round(cy + math.sin(ang) * radius))
-            hx = max(4, min(cols - 5, hx))
-            hy = max(4, min(rows - 5, hy))
-            dx = 1 if math.cos(ang) >= 0 else -1
+            lane = lanes[(i // 2) % len(lanes)]
+            dx = 1 if i % 2 == 0 else -1
             dy = 0
-            if abs(math.sin(ang)) > 0.85:
+            hx = cx - offset if dx > 0 else cx + offset
+            body = self._spawn_body(hx, lane, dx)
+            if body is None:
+                c = self.free_cell() or {'x': cx, 'y': cy}
+                hx, lane = c['x'], c['y']
+                dy = 1 if lane < cy else -1
                 dx = 0
-                dy = 1 if math.sin(ang) > 0 else -1
-            body = [{'x': hx - dx * k, 'y': hy - dy * k} for k in range(4)]
+                body = self._spawn_body(hx, lane, dx, dy)
+                if body is None:
+                    body = [{'x': max(0, hx - k), 'y': lane} for k in range(4)]
+                    dx, dy = 1, 0
             self.snakes.append({
-                'pid': p['id'], 'name': p['name'], 'color': p['color'], 'alive': True, 'respawn': 0,
-                'x': hx, 'y': hy, 'dir': {'x': dx, 'y': dy}, 'queue': [], 'body': body,
+                'pid': p['id'], 'name': p['name'], 'color': p['color'], 'alive': True,
+                'x': body[0]['x'], 'y': body[0]['y'], 'dir': {'x': dx, 'y': dy},
+                'queue': [], 'body': body,
                 'score': 0, 'kills': 0, 'grow': 0,
                 'speedT': 0, 'slowT': 0, 'shield': 0, 'ghost': 0, 'next_at': 0.0,
             })
             self.effects[p['id']] = {'speed': 0, 'slow': 0, 'ghost': 0, 'shield': 0, 'portal': 0}
-        self.lives = {s['pid']: 3 for s in self.snakes}
+        self.lives = {s['pid']: 1 for s in self.snakes}
         self.foods = []
         for _ in range(int(self.diff['food'])):
             self.spawn_food()
         self.powers = []
+
+    def _spawn_body(self, x: int, y: int, dx: int, dy: int = 0, ln: int = 4) -> list[dict] | None:
+        """生成一条蛇的初始身体，越界或压到墙体时返回 None。
+
+        Args:
+            x: 蛇头列坐标。
+            y: 蛇头行坐标。
+            dx: 蛇头朝向的横向分量。
+            dy: 蛇头朝向的纵向分量。
+            ln: 初始长度。
+
+        Returns:
+            身体列表（头在前），不可用时为 None。
+        """
+        cells = [{'x': x - dx * k, 'y': y - dy * k} for k in range(ln)]
+        for c in cells:
+            if not (0 <= c['x'] < self.cols and 0 <= c['y'] < self.rows):
+                return None
+            if any(o['x'] == c['x'] and o['y'] == c['y'] for o in self.obstacles):
+                return None
+        return cells
 
     def occupied(self, x: int, y: int) -> bool:
         """判断某格是否已被墙体/蛇身/食物/道具占用。
@@ -164,8 +198,10 @@ class Game:
         """推进一个逻辑帧（由 GameService 按难度速度调用）。"""
         self.tick += 1
         if self.phase == 'countdown':
-            self.countdown -= 1
-            if self.countdown <= 0:
+            self.countdown_ms -= 1000.0 / max(1, self.diff['speed'])
+            self.countdown = max(0, math.ceil(self.countdown_ms / 1000.0))
+            if self.countdown_ms <= 0:
+                self.countdown = 0
                 self.phase = 'playing'
                 self.started_at = time.time()
             return
@@ -174,11 +210,6 @@ class Game:
         self.elapsed += 1000.0 / self.diff['speed']
 
         now = time.time()
-        for s in self.snakes:
-            if not s['alive']:
-                s['respawn'] -= 1
-                if s['respawn'] <= 0 and self.lives.get(s['pid'], 0) > 0:
-                    self.respawn_snake(s)
 
         heads: dict[str, list[int]] = {}
         for s in self.snakes:
@@ -297,7 +328,7 @@ class Game:
         self.check_end()
 
     def kill(self, s: dict, reason: str) -> None:
-        """处理一次死亡：扣命、置复活倒计时、记录击杀归属。
+        """处理一次死亡：一命制，撞到即淘汰（与双人对战一致，不再复活）。
 
         Args:
             s: 蛇状态。
@@ -306,58 +337,32 @@ class Game:
         s['alive'] = False
         s['body'] = []
         self.lives[s['pid']] = max(0, self.lives.get(s['pid'], 1) - 1)
-        s['respawn'] = 12 if self.lives[s['pid']] > 0 else 0
         self.events.append({'t': 'die', 'pid': s['pid'], 'reason': reason})
         if reason == 'body':
             for o in self.snakes:
                 if o['pid'] == s['pid'] or not o['alive']:
                     continue
                 if any(b['x'] == s['x'] and b['y'] == s['y'] for b in o['body']):
+                    # 只记击杀数：双人对战里撞到对手身体不给分，这里同样不加分
                     o['kills'] += 1
-                    o['score'] += 25
                     break
-
-    def respawn_snake(self, s: dict) -> None:
-        """在随机空格复活一条蛇（4 节、60 tick 无敌护盾）。
-
-        Args:
-            s: 蛇状态。
-        """
-        c = self.free_cell()
-        if not c:
-            s['respawn'] = 6
-            return
-        s['alive'] = True
-        s['x'] = c['x']
-        s['y'] = c['y']
-        d = DIRS[int(random.random() * 4)]
-        s['dir'] = {'x': d[0], 'y': d[1]}
-        s['body'] = [{'x': c['x'] - d[0] * k, 'y': c['y'] - d[1] * k} for k in range(4)]
-        s['queue'] = []
-        s['shield'] = 60
-        s['next_at'] = 0.0
-        self.events.append({'t': 'respawn', 'pid': s['pid']})
 
     def alive_count(self) -> int:
         """返回当前存活的蛇数量。"""
         return sum(1 for s in self.snakes if s['alive'])
 
     def check_end(self) -> None:
-        """检查结束条件（全员无命，或多人局仅剩 1 条命，或超过 4 分钟）。"""
+        """检查结束条件（一命制：存活的只剩 1 人即结束，全员出局也算结束）。"""
         if self.phase != 'playing':
             return
-        with_lives = [s for s in self.snakes if self.lives.get(s['pid'], 0) > 0 or s['alive']]
-        if not with_lives:
+        if len(self.snakes) > 1 and self.alive_count() <= 1:
             self.finish()
             return
-        if len(self.snakes) > 1 and self.alive_count() <= 1 and \
-                len([s for s in with_lives if s['alive'] or self.lives.get(s['pid'], 0) > 0]) <= 1:
-            self.finish()
         if self.elapsed > 4 * 60 * 1000:
             self.finish()
 
     def finish(self) -> None:
-        """结算本局：按分数排序、写入玩家统计并广播 over。"""
+        """结算本局：最后存活者获胜（全员出局时按分数定冠军），并广播 over。"""
         if self.phase == 'over':
             return
         self.phase = 'over'
@@ -367,13 +372,15 @@ class Game:
             'lives': self.lives.get(s['pid'], 0), 'alive': s['alive'], 'color': s['color'],
         } for s in self.snakes]
         rows.sort(key=lambda r: (-r['score'], -r['kills']))
-        if rows:
-            rows[0]['win'] = True
+        last = next((r for r in rows if r['alive']), None)
+        if last:
+            last['win'] = True
         self.room.last_result = rows
         self.room.service.leaderboard.match(
             [{'name': r['name'], 'score': r['score'], 'kills': r['kills'], 'win': bool(r.get('win'))} for r in rows])
         self.room.broadcast({
             't': 'over', 'round': self.round, 'result': rows,
+            'draw': not any(r.get('win') for r in rows),
             'totals': [{
                 'name': p['name'],
                 'score': next((s['score'] for s in self.snakes if s['pid'] == p['id']), 0),
@@ -383,7 +390,8 @@ class Game:
             'canRematch': True,
         })
         self.room.service.log('房间 %s 第 %d 局结束，冠军 %s' % (
-            self.room.code, self.round, rows[0]['name'] if rows else '-'))
+            self.room.code, self.round,
+            next((r['name'] for r in rows if r.get('win')), '-')))
 
     # ------------------------------------------------------------------ 快照
     def snapshot(self) -> dict:
