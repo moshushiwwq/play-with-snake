@@ -1,8 +1,8 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller 规格：客户端（单文件 exe，内嵌本机回环托管的 HTML 页面）。
+"""PyInstaller 规格：客户端（单文件 exe，启动后搜索服务器并用浏览器打开其页面）。
 
-单文件模式下 datas 会在启动时解压到 sys._MEIPASS，server/paths.py 的
-resource_path() 已按该目录解析，因此页面资源不会出现「找不到文件」。
+客户端不再自己托管页面，因此不需要打包 `client/web`；页面由服务端随自己的 exe 分发。
+`console=False` 与默认清单即普通用户权限：不弹 UAC、不请求管理员。
 """
 import os
 
@@ -13,9 +13,9 @@ a = Analysis(
     [os.path.join(ROOT, 'client', 'main.py')],
     pathex=[ROOT],
     binaries=[],
-    datas=[(os.path.join(ROOT, 'client', 'web'), os.path.join('client', 'web'))],
+    datas=[],
     hiddenimports=[
-        'PyQt6.QtSql', 'PyQt6.QtNetwork',
+        'PyQt6.QtNetwork',
     ],
     hookspath=[os.path.join(ROOT, 'build', 'hooks')],
     hooksconfig={},
